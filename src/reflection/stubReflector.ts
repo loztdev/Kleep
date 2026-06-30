@@ -85,6 +85,13 @@ export class StubReflector implements Reflector {
   }
 }
 
+/**
+ * Determines whether two assets reference at least one common entity or overlapping content token.
+ *
+ * @param a - The first asset to compare
+ * @param b - The second asset to compare
+ * @returns `true` if the assets share an entity ID or, when either asset has no entity IDs, share a token in their content; `false` otherwise
+ */
 function sharesAnyEntity(a: MemoryAsset, b: MemoryAsset): boolean {
   if (a.entity_ids.length === 0 || b.entity_ids.length === 0) {
     // No entity refs — fall back to overlapping content tokens.
@@ -97,6 +104,13 @@ function sharesAnyEntity(a: MemoryAsset, b: MemoryAsset): boolean {
   return false;
 }
 
+/**
+ * Determines whether two texts express opposing negation.
+ *
+ * @param a - The first text to compare
+ * @param b - The second text to compare
+ * @returns `true` if one text contains a negation cue and the other does not, and their remaining content is closely similar; `false` otherwise.
+ */
 function looksLikeNegation(a: string, b: string): boolean {
   const ta = tokenize(a);
   const tb = tokenize(b);
@@ -109,6 +123,13 @@ function looksLikeNegation(a: string, b: string): boolean {
   return jaccard(stripA, stripB) >= 0.6;
 }
 
+/**
+ * Computes the Jaccard similarity between two token arrays.
+ *
+ * @param a - The first token array.
+ * @param b - The second token array.
+ * @returns The Jaccard similarity score, or `0` when both arrays are empty.
+ */
 function jaccard(a: string[], b: string[]): number {
   const sa = new Set(a);
   const sb = new Set(b);
@@ -119,6 +140,12 @@ function jaccard(a: string[], b: string[]): number {
   return union === 0 ? 0 : inter / union;
 }
 
+/**
+ * Normalizes whitespace and letter casing in a string.
+ *
+ * @param s - The input string
+ * @returns The trimmed, lowercase string with internal whitespace collapsed to single spaces
+ */
 function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }

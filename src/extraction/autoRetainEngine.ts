@@ -288,6 +288,12 @@ export class AutoRetainEngine {
   }
 }
 
+/**
+ * Creates a stable key for an asset.
+ *
+ * @param asset - The asset to normalize into a key
+ * @returns A normalized signature string for the asset
+ */
 function pendingKey(asset: AnyAsset): string {
   const ents = [...asset.entity_ids].sort().join(",");
   const vp = asset.viewpoint_holder ?? "";

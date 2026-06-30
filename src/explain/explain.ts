@@ -23,7 +23,11 @@ import type {
   TemporalView,
 } from "./types";
 
-/** Build a bundle for an asset as a whole. */
+/**
+ * Builds a provenance bundle for an asset.
+ *
+ * @returns The asset-level provenance bundle.
+ */
 export function explain(asset: AnyAsset): ProvenanceBundle {
   return {
     subject: {
@@ -41,7 +45,14 @@ export function explain(asset: AnyAsset): ProvenanceBundle {
   };
 }
 
-/** Build a bundle narrowed to a single attribute on a WorldBibleEntry. */
+/**
+ * Builds a provenance bundle for a single attribute on a world bible entry.
+ *
+ * @param entry - The entry containing the attribute
+ * @param attributeKey - The attribute key to locate
+ * @returns A provenance bundle for the matching attribute
+ * @throws Error if the attribute is not found on the entry
+ */
 export function explainAttribute(
   entry: WorldBibleEntry,
   attributeKey: string,
@@ -71,8 +82,10 @@ export function explainAttribute(
 }
 
 /**
- * Convenience: build bundles for every attribute on an entry.
- * Useful for an "expand all" view on the entity card.
+ * Builds provenance bundles for every attribute on an entry.
+ *
+ * @param entry - The entry whose attributes are explained
+ * @returns A bundle for each attribute on `entry`
  */
 export function explainAllAttributes(
   entry: WorldBibleEntry,
@@ -80,7 +93,12 @@ export function explainAllAttributes(
   return entry.attributes.map((a) => explainAttribute(entry, a.key));
 }
 
-// ---- internals ---------------------------------------------------------
+/**
+ * Narrows an asset to a world bible entry.
+ *
+ * @param asset - The asset to check
+ * @returns `true` if the asset is a world bible entry, `false` otherwise.
+ */
 
 function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   return (
@@ -89,6 +107,11 @@ function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   );
 }
 
+/**
+ * Builds a display headline for an asset.
+ *
+ * @returns A headline based on the asset's kind and available text.
+ */
 function headlineFor(asset: AnyAsset): string {
   if (isWorldBibleEntry(asset)) {
     return `${asset.canonical_name} — ${asset.entity_type}`;
@@ -100,10 +123,21 @@ function headlineFor(asset: AnyAsset): string {
   return trunc((asset as MemoryAsset).content, 80);
 }
 
+/**
+ * Builds a confidence view from provenance data.
+ *
+ * @param p - The provenance record to read from
+ * @returns The confidence score and source
+ */
 function confidenceView(p: Provenance): ConfidenceView {
   return { score: p.confidence_score, source: p.confidence_source };
 }
 
+/**
+ * Maps provenance temporal data into a view model.
+ *
+ * @returns The turn and narrative time range fields from the provenance.
+ */
 function temporalView(p: Provenance): TemporalView {
   return {
     turn_start: p.temporal_range.turn_start,
@@ -114,6 +148,11 @@ function temporalView(p: Provenance): TemporalView {
   };
 }
 
+/**
+ * Builds anchor views sorted by source turn and turn order.
+ *
+ * @returns The quote anchors mapped to `AnchorView` objects, with the source turn first and the remaining anchors ordered by ascending `turn_id`.
+ */
 function anchorsFor(p: Provenance): AnchorView[] {
   // Source turn first — it's the "first witness" and the UI shows it
   // most prominently.
@@ -131,10 +170,23 @@ function anchorsFor(p: Provenance): AnchorView[] {
   }));
 }
 
+/**
+ * Truncates a string to a maximum length.
+ *
+ * @param s - The string to truncate
+ * @param n - The maximum length
+ * @returns The original string when its length is within the limit, or a shortened string ending with an ellipsis
+ */
 function trunc(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
+/**
+ * Converts a value into a displayable string.
+ *
+ * @param v - The value to convert
+ * @returns The string representation of `v`, or `—` when the value cannot be represented
+ */
 function stringify(v: unknown): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v;
@@ -146,6 +198,11 @@ function stringify(v: unknown): string {
   }
 }
 
+/**
+ * Exposes selected internal helpers for inspection.
+ *
+ * @returns An object containing `isWorldBibleEntry` and `headlineFor`.
+ */
 export function _internals() {
   return { isWorldBibleEntry, headlineFor };
 }

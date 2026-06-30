@@ -30,6 +30,12 @@ export const NEUTRAL_DISPOSITION: DispositionMatrix = {
   literalism: 0,
 };
 
+/**
+ * Creates a complete disposition matrix with bounded values.
+ *
+ * @param partial - Optional disposition values to override the defaults
+ * @returns A disposition matrix with `skepticism` and `literalism` clamped to the range from 0 to 1
+ */
 export function withDefaults(
   partial?: Partial<DispositionMatrix>,
 ): DispositionMatrix {
@@ -40,34 +46,40 @@ export function withDefaults(
 }
 
 /**
- * Per-skepticism confidence floor — a fact whose confidence is below
- * this can still persist, but only after multiple corroborations.
- * Above the floor, single-mention acceptance is fine.
+ * Computes the confidence floor for a disposition matrix.
  *
- * Floor maxes at 0.6 so at full skepticism, ~user-asserted facts
- * (typically scored 0.7+) still flow through on a single mention.
+ * @param d - The disposition matrix to evaluate
+ * @returns The confidence floor derived from `d.skepticism`
  */
 export function confidenceFloor(d: DispositionMatrix): number {
   return d.skepticism * 0.6;
 }
 
 /**
- * Per-skepticism corroboration count — how many times a sub-floor
- * fact must show up before the engine persists it. At skepticism=0,
- * a single mention is enough (no skepticism); at 1, four mentions.
+ * Computes the corroboration count required for a fact to persist.
+ *
+ * @param d - The disposition matrix used to derive the threshold
+ * @returns The minimum number of mentions required, with a floor of 1
  */
 export function mentionsRequired(d: DispositionMatrix): number {
   return Math.max(1, Math.ceil(d.skepticism * 4));
 }
 
 /**
- * Per-literalism score multiplier for WORLD-network assets in fusion.
- * literalism=0 → 1× (no boost). literalism=1 → 3× boost.
+ * Computes the WORLD-network score multiplier from literalism.
+ *
+ * @param d - The disposition matrix.
+ * @returns The multiplier applied to WORLD-network assets.
  */
 export function worldBoostMultiplier(d: DispositionMatrix): number {
   return 1 + d.literalism * 2;
 }
 
+/**
+ * Clamps a numeric value to the range from 0 to 1.
+ *
+ * @returns `0` for non-finite values; otherwise the value constrained to the range from 0 to 1.
+ */
 function clamp01(v: number): number {
   if (!Number.isFinite(v)) return 0;
   return Math.max(0, Math.min(1, v));
