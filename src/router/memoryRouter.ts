@@ -33,7 +33,9 @@ import type {
 } from "../storage";
 import { assertAllowed } from "./networkRules";
 
-export type AnyAsset = MemoryAsset | WorldBibleEntry | LoreSnippet;
+// AnyAsset is exported from `../ingest` as the canonical name; we keep
+// the alias here just for readability inside this file.
+type AnyAsset = MemoryAsset | WorldBibleEntry | LoreSnippet;
 
 function isLoreSnippet(asset: AnyAsset): asset is LoreSnippet {
   return asset.kind === MemoryKind.LORE;
