@@ -10,10 +10,21 @@
 
 import type { Turn } from "./types";
 
+// Inline type-only alias — matches `retrieval/tokenBudget.TokenEstimator`
+// without creating a cross-layer import. We intentionally don't export.
+type TokenEstimator = (text: string) => number;
+
 export class ConversationBuffer {
   private turns: Turn[] = [];
   private byId = new Map<string, Turn>();
   private highWater = 0;
+  /**
+   * Turn ids that have been rolled up into a SUMMARY MemoryAsset by
+   * Tier 3.7's RollingSummarizer. Still kept here for ordering and
+   * audit; excluded from token counts and the "live window" used for
+   * prompt assembly.
+   */
+  private summarized = new Set<string>();
 
   append(turn: Turn): void {
     if (this.byId.has(turn.id)) {
@@ -57,5 +68,37 @@ export class ConversationBuffer {
   /** Current high-water mark — index of the next pending turn. */
   processedCount(): number {
     return this.highWater;
+  }
+
+  // ---- summarization-aware helpers (Tier 3.7) -------------------------
+
+  /** Has this turn already been rolled into a SUMMARY asset? */
+  isSummarized(turnId: string): boolean {
+    return this.summarized.has(turnId);
+  }
+
+  /** Mark every supplied turn id as summarized. Unknown ids are ignored. */
+  markSummarized(turnIds: readonly string[]): void {
+    for (const id of turnIds) {
+      if (this.byId.has(id)) this.summarized.add(id);
+    }
+  }
+
+  /** Turns currently visible to prompt assembly (not yet summarized). */
+  liveTurns(): readonly Turn[] {
+    return this.turns.filter((t) => !this.summarized.has(t.id));
+  }
+
+  /** Sum of estimated tokens over live (non-summarized) turns. */
+  liveTokenCount(estimate: TokenEstimator): number {
+    let total = 0;
+    for (const t of this.turns) {
+      if (!this.summarized.has(t.id)) total += estimate(t.content);
+    }
+    return total;
+  }
+
+  summarizedCount(): number {
+    return this.summarized.size;
   }
 }
