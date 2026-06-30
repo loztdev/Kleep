@@ -29,6 +29,12 @@ import {
 } from "../schema";
 import type { ConversationBuffer, Turn } from "../conversation";
 import type { Embedder } from "../embedding";
+import {
+  confidenceFloor,
+  mentionsRequired,
+  withDefaults,
+  type DispositionMatrix,
+} from "../disposition";
 import type {
   AnyAsset,
   IngestOutcome,
@@ -76,8 +82,7 @@ export interface AutoRetainEngineOptions {
    */
   onAnchorMiss?: "throw" | "skip";
   /**
-   * Default confidence source applied to ingested assets. Tier 4.10's
-   * disposition matrix can override this per-engine.
+   * Default confidence source applied to ingested assets.
    */
   defaultConfidenceSource?: ConfidenceSource;
   /**
@@ -86,12 +91,27 @@ export interface AutoRetainEngineOptions {
    * the vector store can accept it.
    */
   embedder?: Embedder;
+  /**
+   * Tier 4.10 — skepticism slider. Facts whose confidence falls below
+   * `confidenceFloor(disposition)` won't persist on a single mention;
+   * they sit in a pending queue and only flow through once they've
+   * been mentioned `mentionsRequired(disposition)` times. Default is
+   * neutral (skepticism=0): every materialized fact persists once.
+   */
+  disposition?: Partial<DispositionMatrix>;
 }
 
 export class AutoRetainEngine {
   private readonly onAnchorMiss: "throw" | "skip";
   private readonly defaultConfidenceSource: ConfidenceSource;
   private readonly embedder?: Embedder;
+  private readonly disposition: DispositionMatrix;
+  /**
+   * Pending sub-floor facts awaiting corroboration. Keyed by a stable
+   * signature (kind + network + entity_ids + viewpoint + normalized
+   * content). Cleared when the fact accumulates enough mentions.
+   */
+  private readonly pendingMentions = new Map<string, number>();
 
   constructor(
     private readonly buffer: ConversationBuffer,
@@ -103,6 +123,7 @@ export class AutoRetainEngine {
     this.defaultConfidenceSource =
       opts.defaultConfidenceSource ?? ConfidenceSource.INFERRED;
     this.embedder = opts.embedder;
+    this.disposition = withDefaults(opts.disposition);
   }
 
   /**
@@ -120,6 +141,7 @@ export class AutoRetainEngine {
       for (const fact of facts) {
         const built = this.materialize(turn, fact);
         if (!built) continue;
+        if (!this.passesSkepticism(built)) continue;
         const ready = await this.embedIfLore(built);
         outcomes.push(this.sink.ingest(ready));
       }
@@ -131,6 +153,30 @@ export class AutoRetainEngine {
   }
 
   // ---- internals -------------------------------------------------------
+
+  /**
+   * Tier 4.10 — skepticism gate.
+   *
+   * Lets through assets whose confidence meets the per-skepticism floor.
+   * Sub-floor assets are counted in a pending-mentions table; they pass
+   * once their tally reaches `mentionsRequired(disposition)`. Default
+   * disposition (skepticism=0) sets a floor of 0 and a requirement of
+   * 1, so every materialized fact passes through.
+   */
+  private passesSkepticism(asset: AnyAsset): boolean {
+    const floor = confidenceFloor(this.disposition);
+    if (asset.provenance.confidence_score >= floor) return true;
+
+    const required = mentionsRequired(this.disposition);
+    const key = pendingKey(asset);
+    const count = (this.pendingMentions.get(key) ?? 0) + 1;
+    if (count >= required) {
+      this.pendingMentions.delete(key);
+      return true;
+    }
+    this.pendingMentions.set(key, count);
+    return false;
+  }
 
   private async embedIfLore(asset: AnyAsset): Promise<AnyAsset> {
     if (asset.kind !== "lore") return asset;
@@ -240,4 +286,11 @@ export class AutoRetainEngine {
       temporal_range: TemporalRangeSchema.parse({ turn_start: turn.id }),
     });
   }
+}
+
+function pendingKey(asset: AnyAsset): string {
+  const ents = [...asset.entity_ids].sort().join(",");
+  const vp = asset.viewpoint_holder ?? "";
+  const content = asset.content.trim().toLowerCase().replace(/\s+/g, " ");
+  return `${asset.kind}|${asset.network}|${ents}|${vp}|${content}`;
 }

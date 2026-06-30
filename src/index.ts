@@ -28,3 +28,6 @@ export * from "./ingest";
 export * from "./reconciler";
 export * from "./retrieval";
 export * from "./summarization";
+export * from "./explain";
+export * from "./reflection";
+export * from "./disposition";
