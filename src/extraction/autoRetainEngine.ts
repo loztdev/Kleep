@@ -169,12 +169,14 @@ export class AutoRetainEngine {
 
     const required = mentionsRequired(this.disposition);
     const key = pendingKey(asset);
-    const count = this.pendingMentions.get(key) ?? 0;
-    if (count >= required) {
+    const previous = this.pendingMentions.get(key) ?? 0;
+    if (previous >= required) {
       return true;
     }
-    this.pendingMentions.set(key, count + 1);
-    return false;
+
+    const count = previous + 1;
+    this.pendingMentions.set(key, count);
+    return count >= required;
   }
 
   private async embedIfLore(asset: AnyAsset): Promise<AnyAsset> {
