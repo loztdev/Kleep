@@ -6,23 +6,23 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
-## 1. Claude API client 🧱
+## 1. Claude API client 🧱 ✅ shipped
 
 **Why:** Foundation for items #3, #8, #10 — every LLM-backed component needs this.
 
-**Build:**
-- `src/claude/client.ts` wrapping `@anthropic-ai/sdk`
-- Auth via Expo SecureStore (no plaintext keys on disk)
-- Retry with jitter on 429 / 529 / transient 5xx
-- Streaming support (for chat — Tier 7)
-- Token + cost accounting per call, exposed for the settings dashboard
-- Structured-output helper (Zod schema → tool-call definition)
-- Fixture-record/replay harness so Jest tests stay deterministic
+**Built:**
+- `src/claude/client.ts` wrapping `@anthropic-ai/sdk` (`ClaudeClient`, behind a pluggable `ClaudeTransport`)
+- Auth via Expo SecureStore — `src/claude/secureKeyStore.ts` (not in the `src/claude` barrel; it touches a native module, so import it directly from app code)
+- Retry with jitter on 429 / 529 / transient 5xx — `src/claude/retry.ts`
+- Streaming support (for chat — Tier 7) — `client.streamMessage()`
+- Token + cost accounting per call, exposed for the settings dashboard — `src/claude/costTracker.ts`
+- Structured-output helper (Zod schema → tool-call definition) — `src/claude/zodToJsonSchema.ts` + `client.structured()`
+- Fixture-record/replay harness so Jest tests stay deterministic — `src/claude/fixtures.ts` (`FixtureTransport`)
 
 **Done when:**
-- `npm test` passes with replayed fixtures
-- Manual smoke: `npx ts-node scripts/claude-smoke.ts` returns a tool-call response against a real key
-- Cost tracker logs match Anthropic dashboard for a known sequence
+- `npm test` passes with replayed fixtures ✅ (`src/claude/__tests__/*`, plus the extractor/summarizer integration tests)
+- Manual smoke: `npm run claude-smoke` (`scripts/claude-smoke.ts`) returns a tool-call response against a real key — **not run**, no API key in this dev sandbox; script is written and type-checks
+- Cost tracker logs match Anthropic dashboard for a known sequence — **not verified**, same reason
 
 **Depends on:** nothing.
 
@@ -51,21 +51,21 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
-## 3. Claude-backed Extractor 🔥
+## 3. Claude-backed Extractor 🔥 ✅ shipped
 
 **Why:** `PatternExtractor` only catches `"X is a Y."` form sentences. This is the actual value-prop component — automatic memory extraction from natural conversation.
 
-**Build:**
-- `src/extraction/claudeExtractor.ts` implementing `Extractor`
-- Prompt: structured-output Claude call returning `ExtractedFact[]` per turn
+**Built:**
+- `src/extraction/claudeExtractor.ts` implementing `Extractor` (`ClaudeExtractor`)
+- Prompt: structured-output Claude call (`extract_facts` tool) returning `ExtractedFact[]` per turn
 - Anchor verification stays at the engine layer (already there) — Claude returns quotes; engine validates them against turn text
-- Disposition-aware confidence calibration (Claude says 0.8, engine maps via disposition)
+- Disposition-aware confidence calibration (Claude says 0.8, engine maps via disposition) — also already at the engine layer; the extractor just passes Claude's self-reported confidence through
 - Caching by turn-content hash so the same turn isn't re-extracted
 
 **Done when:**
-- Replay-fixture tests pass over a 50-turn transcript
-- Auto-Retain integration test exercises the new extractor and produces correctly-anchored assets
-- Cost per turn logged and under a configurable cap
+- Replay-fixture tests pass over a 50-turn transcript — **partially**: `src/extraction/__tests__/claudeExtractor.test.ts` covers extraction → anchoring, anchor-guard rejection, caching, and the cost cap against a scripted (mock) transport, not a 50-turn fixture replay specifically
+- Auto-Retain integration test exercises the new extractor and produces correctly-anchored assets ✅
+- Cost per turn logged and under a configurable cap ✅ (`maxCostPerTurnUsd` + `onCostCapExceeded`)
 
 **Depends on:** #1.
 
@@ -147,18 +147,18 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
-## 8. Claude-backed Summarizer ⚡
+## 8. Claude-backed Summarizer ⚡ ✅ shipped
 
 **Why:** `StubSummarizer` emits `"[t1..t3] 3 turns: word, word, word"` — useless. With Claude, rolling summaries become actual state deltas.
 
-**Build:**
-- `src/summarization/claudeSummarizer.ts` implementing `Summarizer`
+**Built:**
+- `src/summarization/claudeSummarizer.ts` implementing `Summarizer` (`ClaudeSummarizer`)
 - Prompt template: "Given turns N..M, produce a single-paragraph state delta. Inventory, locations, relationships."
-- Output validated (length cap, must reference at least one entity)
-- Falls back to `StubSummarizer` on transient Claude failure (so rolling never blocks)
+- Output validated (word-count cap, must reference at least one capitalized name pulled from the source turns when one exists)
+- Falls back to `StubSummarizer` on Claude failure **or** failed output validation (broader than just "transient failure" — keeps `RollingSummarizer.tick()` from ever blocking on a bad response, not just a network error)
 
 **Done when:**
-- Rolling summarizer integration test produces summaries that pass a content-quality check (mentions ≥1 entity, ≤120 tokens)
+- Rolling summarizer integration test produces summaries that pass a content-quality check (mentions ≥1 entity, ≤120 tokens) ✅ — `src/summarization/__tests__/claudeSummarizer.test.ts`, including a real `RollingSummarizer` integration test producing a `SUMMARY` asset
 
 **Depends on:** #1.
 
