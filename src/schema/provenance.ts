@@ -16,7 +16,9 @@ import { z } from "zod";
  * string so backends (UUIDs, monotonic counters, hashes) can choose
  * their own scheme without churning the schema.
  */
+/** Zod validator for a non-empty TurnId string. */
 export const TurnIdSchema = z.string().min(1);
+/** Inferred TS type — alias for non-empty string. */
 export type TurnId = z.infer<typeof TurnIdSchema>;
 
 /**
@@ -31,9 +33,11 @@ export const ConfidenceSource = {
   EXTERNAL: "external",
 } as const;
 
+/** String-literal union for the `ConfidenceSource` enum. */
 export type ConfidenceSource =
   (typeof ConfidenceSource)[keyof typeof ConfidenceSource];
 
+/** Zod validator for the `ConfidenceSource` enum. */
 export const ConfidenceSourceSchema = z.enum([
   ConfidenceSource.USER_ASSERTED,
   ConfidenceSource.NARRATOR_ASSERTED,
@@ -73,6 +77,7 @@ export const RawQuoteAnchorSchema = z
     }
   });
 
+/** Inferred TS type for a validated `RawQuoteAnchor`. */
 export type RawQuoteAnchor = z.infer<typeof RawQuoteAnchorSchema>;
 
 /**
@@ -108,6 +113,7 @@ export const TemporalRangeSchema = z
     }
   });
 
+/** Inferred TS type for a validated `TemporalRange`. */
 export type TemporalRange = z.infer<typeof TemporalRangeSchema>;
 
 /**
@@ -141,4 +147,5 @@ export const ProvenanceSchema = z
     }
   });
 
+/** Inferred TS type for a validated `Provenance` bundle. */
 export type Provenance = z.infer<typeof ProvenanceSchema>;

@@ -17,18 +17,24 @@ import {
   type WorldBibleAttribute,
 } from "../schema";
 
+/** What happened to an attribute during reconciliation. */
 export type AttributeMergeKind =
   | "added"          // attribute didn't exist before
   | "corroborated"   // same value arrived again → relevance/anchor bumped
   | "state_changed"  // value replaced (higher confidence or newer)
   | "ignored";       // value differs but incoming loses on confidence/recency
 
+/** Outcome bundle returned from `mergeAttribute`. */
 export interface AttributeMergeResult {
   kind: AttributeMergeKind;
   attribute: WorldBibleAttribute;
   previousValue?: unknown;
 }
 
+/**
+ * Decide what happens when `incoming` arrives and an existing attribute
+ * may already be present. Pure — returns the merge result; doesn't write.
+ */
 export function mergeAttribute(
   existing: WorldBibleAttribute | undefined,
   incoming: WorldBibleAttribute,
@@ -113,10 +119,12 @@ export function combineProvenance(
   };
 }
 
+/** Stable hash key for an anchor used during anchor de-duplication. */
 function anchorKey(a: RawQuoteAnchor): string {
   return `${a.turn_id}::${a.quote}`;
 }
 
+/** Value-equality for attribute values, with JSON fallback for objects. */
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;

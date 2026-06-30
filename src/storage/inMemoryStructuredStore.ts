@@ -29,6 +29,7 @@ function asArray<T>(v: T | readonly T[] | undefined): readonly T[] | undefined {
   return Array.isArray(v) ? (v as readonly T[]) : ([v as T] as const);
 }
 
+/** In-memory `StructuredStore` reference impl, indexed for the Tier 1+2 filters. */
 export class InMemoryStructuredStore implements StructuredStore {
   private byId = new Map<string, Stored>();
   private byEntityId = new Map<string, WorldBibleEntry>();
@@ -44,23 +45,32 @@ export class InMemoryStructuredStore implements StructuredStore {
    */
   private byEntityRef = new Map<string, Set<string>>();
 
+  /** Insert or replace any structured memory asset by id. */
   put(asset: MemoryAsset): void {
     this.replace(asset);
   }
 
+  /** Insert or replace a World Bible entry and update the entity index. */
   putEntry(entry: WorldBibleEntry): void {
     this.replace(entry);
     this.byEntityId.set(entry.entity_id, entry);
   }
 
+  /** Look up any stored asset by its id. */
   get(id: string): Stored | undefined {
     return this.byId.get(id);
   }
 
+  /** Look up an entity card by its `entity_id` (not the asset id). */
   getEntry(entityId: string): WorldBibleEntry | undefined {
     return this.byEntityId.get(entityId);
   }
 
+  /**
+   * Filter assets by any combination of network, kind, entity_id, tag,
+   * and viewpoint_holder. Uses the smallest available index as the
+   * candidate set before scanning.
+   */
   query(filter: StructuredQuery): Stored[] {
     const candidates = this.candidates(filter);
     if (candidates === null) return [];
@@ -91,6 +101,7 @@ export class InMemoryStructuredStore implements StructuredStore {
     return results;
   }
 
+  /** Remove an asset (and its index entries) by id. */
   delete(id: string): boolean {
     const existing = this.byId.get(id);
     if (!existing) return false;
@@ -102,12 +113,14 @@ export class InMemoryStructuredStore implements StructuredStore {
     return true;
   }
 
+  /** Total number of stored assets. */
   size(): number {
     return this.byId.size;
   }
 
   // ---- internals -------------------------------------------------------
 
+  /** Overwrite an asset by id, fully re-indexing if it existed before. */
   private replace(asset: Stored): void {
     const existing = this.byId.get(asset.id);
     if (existing) this.unindex(existing);
@@ -115,6 +128,7 @@ export class InMemoryStructuredStore implements StructuredStore {
     this.index(asset);
   }
 
+  /** Add this asset's id to every secondary index that applies. */
   private index(asset: Stored): void {
     bucket(this.byNetwork, asset.network).add(asset.id);
     bucket(this.byKind, asset.kind as MemoryKind).add(asset.id);
@@ -129,6 +143,7 @@ export class InMemoryStructuredStore implements StructuredStore {
     }
   }
 
+  /** Inverse of `index()` — removes this asset's id from every index. */
   private unindex(asset: Stored): void {
     discard(this.byNetwork.get(asset.network), asset.id);
     discard(this.byKind.get(asset.kind as MemoryKind), asset.id);
@@ -141,6 +156,7 @@ export class InMemoryStructuredStore implements StructuredStore {
     }
   }
 
+  /** Union of an asset's `entity_ids` and (if an entry) its `entity_id`. */
   private entityRefs(asset: Stored): Set<string> {
     const refs = new Set<string>(asset.entity_ids);
     if (isWorldBibleEntry(asset)) refs.add(asset.entity_id);
@@ -176,6 +192,7 @@ export class InMemoryStructuredStore implements StructuredStore {
     return populated[0]!;
   }
 
+  /** True if this asset is the entity card for, or references, `entityId`. */
   private matchesEntity(asset: Stored, entityId: string): boolean {
     if (isWorldBibleEntry(asset) && asset.entity_id === entityId) return true;
     return asset.entity_ids.includes(entityId);

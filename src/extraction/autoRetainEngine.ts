@@ -48,6 +48,7 @@ import type {
   Extractor,
 } from "./types";
 
+/** Thrown when an extractor's quote isn't a verbatim substring of the source turn. */
 export class ExtractionAnchorError extends Error {
   constructor(public readonly turnId: string, public readonly quote: string) {
     super(
@@ -59,6 +60,7 @@ export class ExtractionAnchorError extends Error {
   }
 }
 
+/** Thrown when the engine receives a LORE fact but no `Embedder` is configured. */
 export class MissingEmbedderError extends Error {
   constructor() {
     super(
@@ -68,11 +70,13 @@ export class MissingEmbedderError extends Error {
   }
 }
 
+/** Summary returned from one `AutoRetainEngine.tick()` call. */
 export interface ExtractionTickResult {
   turnsProcessed: number;
   outcomes: IngestOutcome[];
 }
 
+/** Construction options for `AutoRetainEngine`. */
 export interface AutoRetainEngineOptions {
   /**
    * How the engine reacts when the extractor returns a quote that
@@ -101,6 +105,11 @@ export interface AutoRetainEngineOptions {
   disposition?: Partial<DispositionMatrix>;
 }
 
+/**
+ * Tier 2.4 orchestrator — pulls pending turns from the buffer, runs the
+ * extractor with hallucination-guarded anchoring, gates by skepticism,
+ * embeds LORE, and hands off through the IngestSink.
+ */
 export class AutoRetainEngine {
   private readonly onAnchorMiss: "throw" | "skip";
   private readonly defaultConfidenceSource: ConfidenceSource;
@@ -179,6 +188,11 @@ export class AutoRetainEngine {
     return count >= required;
   }
 
+  /**
+   * Populate `embedding` + `embedding_model` on LORE assets via the
+   * configured Embedder. Throws `MissingEmbedderError` if LORE comes
+   * through without one. No-op for non-LORE.
+   */
   private async embedIfLore(asset: AnyAsset): Promise<AnyAsset> {
     if (asset.kind !== "lore") return asset;
     const lore = asset as LoreSnippet;
@@ -192,6 +206,11 @@ export class AutoRetainEngine {
     };
   }
 
+  /**
+   * Convert an `ExtractedFact` into a validated MemoryAsset/Entry/LoreSnippet,
+   * or return null when the extractor's quote can't be anchored and
+   * `onAnchorMiss` is "skip".
+   */
   private materialize(turn: Turn, fact: ExtractedFact): AnyAsset | null {
     try {
       return fact.type === "entity"
@@ -205,6 +224,7 @@ export class AutoRetainEngine {
     }
   }
 
+  /** Wrap an atomic extracted fact in a validated MemoryAsset or LoreSnippet. */
   private buildAtomic(
     turn: Turn,
     fact: ExtractedAtomicFact,
@@ -231,6 +251,7 @@ export class AutoRetainEngine {
       : MemoryAssetSchema.parse(base);
   }
 
+  /** Wrap an extracted entity (with its attributes) in a validated WorldBibleEntry. */
   private buildEntity(turn: Turn, fact: ExtractedEntity): WorldBibleEntry {
     const anchor = this.anchor(turn, fact.quote);
     const provenance = this.provenance(turn, fact.confidence, anchor);
@@ -252,6 +273,7 @@ export class AutoRetainEngine {
     });
   }
 
+  /** Wrap an extracted attribute as a validated WorldBibleAttribute. */
   private buildAttribute(turn: Turn, attr: ExtractedAttribute) {
     const anchor = this.anchor(turn, attr.quote);
     return WorldBibleAttributeSchema.parse({
@@ -261,6 +283,12 @@ export class AutoRetainEngine {
     });
   }
 
+  /**
+   * Re-verify the extractor's `quote` against the source turn text and
+   * build a `RawQuoteAnchor` with computed char offsets. Throws
+   * `ExtractionAnchorError` if the quote isn't a verbatim substring —
+   * the anti-hallucination guard.
+   */
   private anchor(turn: Turn, quote: string) {
     const idx = turn.content.indexOf(quote);
     if (idx < 0 || quote.length === 0) {
@@ -274,6 +302,7 @@ export class AutoRetainEngine {
     });
   }
 
+  /** Build a fully-formed `Provenance` bundle for the current turn/anchor. */
   private provenance(
     turn: Turn,
     confidence: number,
@@ -289,12 +318,7 @@ export class AutoRetainEngine {
   }
 }
 
-/**
- * Creates a stable key for an asset.
- *
- * @param asset - The asset to normalize into a key
- * @returns A normalized signature string for the asset
- */
+/** Stable signature used by the skepticism gate's pending-mentions table. */
 function pendingKey(asset: AnyAsset): string {
   const ents = [...asset.entity_ids].sort().join(",");
   const vp = asset.viewpoint_holder ?? "";

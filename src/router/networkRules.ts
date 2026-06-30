@@ -43,6 +43,7 @@ const RULES: Readonly<Record<MemoryKind, readonly Network[]>> = {
   [MemoryKind.REFLECTION]: ALL_NETWORKS,
 };
 
+/** Thrown when an asset's (kind, network) pair violates the isolation matrix. */
 export class NetworkRuleViolation extends Error {
   constructor(
     public readonly kind: MemoryKind,
@@ -54,14 +55,17 @@ export class NetworkRuleViolation extends Error {
   }
 }
 
+/** Networks this kind is permitted to live in. */
 export function allowedNetworks(kind: MemoryKind): readonly Network[] {
   return RULES[kind];
 }
 
+/** True if `(kind, network)` is a permitted combination. */
 export function isAllowed(kind: MemoryKind, network: Network): boolean {
   return RULES[kind].includes(network);
 }
 
+/** Throws `NetworkRuleViolation` if `(kind, network)` is not permitted. */
 export function assertAllowed(kind: MemoryKind, network: Network): void {
   if (!isAllowed(kind, network)) {
     throw new NetworkRuleViolation(

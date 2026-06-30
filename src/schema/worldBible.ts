@@ -28,6 +28,7 @@ export const WorldBibleAttributeSchema = z
   })
   .strict();
 
+/** Inferred TS type for a validated `WorldBibleAttribute`. */
 export type WorldBibleAttribute = z.infer<typeof WorldBibleAttributeSchema>;
 
 /**
@@ -55,8 +56,10 @@ export const WorldBibleEntrySchema = MemoryAssetBaseSchema.extend({
     }
   });
 
+/** Inferred TS type for a validated `WorldBibleEntry`. */
 export type WorldBibleEntry = z.infer<typeof WorldBibleEntrySchema>;
 
+/** Find one attribute on an entry by key, or `undefined` if absent. */
 export function getAttribute(
   entry: WorldBibleEntry,
   key: string,

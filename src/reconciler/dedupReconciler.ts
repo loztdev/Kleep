@@ -64,9 +64,16 @@ interface AtomicBumpDetails {
   addedAnchors: number;
 }
 
+/** Tier 2.5 — stateless dedup + state-tracking IngestSink in front of the router. */
 export class DedupReconciler implements IngestSink {
+  /** Wraps a router; the reconciler holds no persistent state of its own. */
   constructor(private readonly router: MemoryRouter) {}
 
+  /**
+   * Reconcile `asset` against existing storage and write the merged
+   * result. Returns an outcome describing what happened (created /
+   * bumped / merged / state_changed).
+   */
   ingest(asset: AnyAsset): IngestOutcome {
     if (isWorldBibleEntry(asset)) return this.ingestEntry(asset);
     if (asset.kind === MemoryKind.LORE) return this.ingestLore(asset as LoreSnippet);
@@ -75,6 +82,12 @@ export class DedupReconciler implements IngestSink {
 
   // ---- entries ---------------------------------------------------------
 
+  /**
+   * Merge a new entry into an existing one (if any), running the per-
+   * attribute confidence/recency reconciliation. canonical_name and
+   * entity_type stay pinned to the first witness — a true rename is a
+   * Tier 4.9 reflection-level concern.
+   */
   private ingestEntry(incoming: WorldBibleEntry): IngestOutcome {
     const existing = this.router["structured" as never] as never; // silence ts
     void existing; // we use a public method below
@@ -140,6 +153,11 @@ export class DedupReconciler implements IngestSink {
 
   // ---- atomic facts ----------------------------------------------------
 
+  /**
+   * Dedupe an atomic fact/opinion/etc. by content signature. On a hit,
+   * bump relevance and accumulate the new anchor; on a miss, persist
+   * as a new asset.
+   */
   private ingestAtomic(incoming: MemoryAsset): IngestOutcome {
     const candidates = this.findAtomicCandidates(incoming);
     const match = candidates.find((c) => atomicMatches(c, incoming));
@@ -169,14 +187,15 @@ export class DedupReconciler implements IngestSink {
 
   // ---- lore ------------------------------------------------------------
 
+  /** Write a LoreSnippet through unmodified — lore dedup is a Tier 4.9 concern. */
   private ingestLore(incoming: LoreSnippet): IngestOutcome {
-    // Tier 2.5 doesn't attempt lore dedup; that's a CARA-tier reflection.
     this.router.write(incoming);
     return { kind: "created", asset: incoming };
   }
 
   // ---- lookups ---------------------------------------------------------
 
+  /** Locate a stored WorldBibleEntry by `entity_id`. */
   private findEntry(entityId: string): WorldBibleEntry | undefined {
     const out = this.router.query({ entity_id: entityId });
     for (const a of out) {
@@ -185,6 +204,7 @@ export class DedupReconciler implements IngestSink {
     return undefined;
   }
 
+  /** Narrow the search space for dedup using the structured-store indexes. */
   private findAtomicCandidates(incoming: MemoryAsset): MemoryAsset[] {
     const filter: {
       kind: MemoryKind;
@@ -209,6 +229,7 @@ export class DedupReconciler implements IngestSink {
 
 // ---- helpers -----------------------------------------------------------
 
+/** Type-guard for entity cards. */
 function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   return (
     asset.kind === MemoryKind.ENTITY &&
@@ -216,6 +237,7 @@ function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   );
 }
 
+/** Dedup signature for atomic assets: kind + network + viewpoint + entity_ids + normalized content. */
 function atomicMatches(a: MemoryAsset, b: MemoryAsset): boolean {
   if (a.kind !== b.kind) return false;
   if (a.network !== b.network) return false;
@@ -224,10 +246,12 @@ function atomicMatches(a: MemoryAsset, b: MemoryAsset): boolean {
   return sameEntitySet(a.entity_ids, b.entity_ids);
 }
 
+/** Lowercase + collapse whitespace; used as the content-equality basis. */
 function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Order-insensitive set equality over two entity-id arrays. */
 function sameEntitySet(
   a: readonly string[],
   b: readonly string[],
@@ -239,6 +263,7 @@ function sameEntitySet(
   return true;
 }
 
+/** Pick the right IngestOutcomeKind based on the merge results. */
 function decideEntryOutcome(
   changes: AttributeChange[],
   newAliasCount: number,

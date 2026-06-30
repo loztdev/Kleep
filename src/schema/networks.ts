@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 
+/** Hindsight's four memory networks. See module doc for semantics. */
 export const Network = {
   WORLD: "world",
   EXPERIENCE: "experience",
@@ -21,8 +22,10 @@ export const Network = {
   OPINION: "opinion",
 } as const;
 
+/** String-literal union: "world" | "experience" | "observation" | "opinion". */
 export type Network = (typeof Network)[keyof typeof Network];
 
+/** Zod validator for the `Network` enum. */
 export const NetworkSchema = z.enum([
   Network.WORLD,
   Network.EXPERIENCE,

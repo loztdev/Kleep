@@ -11,6 +11,7 @@
 
 import type { ConfidenceSource, MemoryKind, Network } from "../schema";
 
+/** Flat shape the UI renders for one `RawQuoteAnchor`. */
 export interface AnchorView {
   turn_id: string;
   /** Verbatim quote from the source turn. */
@@ -20,6 +21,7 @@ export interface AnchorView {
   char_end?: number;
 }
 
+/** Flat shape the UI renders for a `TemporalRange`. */
 export interface TemporalView {
   turn_start: string;
   turn_end?: string;
@@ -28,6 +30,7 @@ export interface TemporalView {
   narrative_always: boolean;
 }
 
+/** Flat shape the UI renders for confidence (score + source). */
 export interface ConfidenceView {
   score: number;
   source: ConfidenceSource;

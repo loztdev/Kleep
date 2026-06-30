@@ -34,6 +34,7 @@ import {
 } from "../retrieval/tokenBudget";
 import type { Summarizer } from "./types";
 
+/** Construction options for `RollingSummarizer`. */
 export interface RollingSummarizerOptions {
   /** Trigger summarization when live tokens >= this many. */
   threshold: number;
@@ -53,11 +54,13 @@ export interface RollingSummarizerOptions {
   anchorChars?: number;
 }
 
+/** Summary returned from one `RollingSummarizer.tick()` or `flush()` call. */
 export interface SummarizationTickResult {
   summariesProduced: number;
   outcomes: IngestOutcome[];
 }
 
+/** Tier 3.7 — rolls old buffer turns into SUMMARY assets when token threshold is crossed. */
 export class RollingSummarizer {
   private readonly threshold: number;
   private readonly windowSize: number;
@@ -86,6 +89,11 @@ export class RollingSummarizer {
    * live-token count drops back under the threshold (or no live turns
    * remain).
    */
+  /**
+   * Repeatedly summarize the oldest live window while live tokens
+   * exceed the configured threshold. Each pass consumes `windowSize`
+   * turns and emits one SUMMARY asset.
+   */
   async tick(): Promise<SummarizationTickResult> {
     const outcomes: IngestOutcome[] = [];
     let summariesProduced = 0;
@@ -107,6 +115,11 @@ export class RollingSummarizer {
    * Force-summarize the oldest live window right now, regardless of
    * the threshold. Useful at conversation boundaries / shutdown.
    */
+  /**
+   * Summarize the oldest live window unconditionally. Useful at
+   * conversation boundaries or shutdown — runs one pass even if the
+   * threshold isn't met.
+   */
   async flush(): Promise<SummarizationTickResult> {
     const window = this.nextWindow();
     if (window.length === 0) {
@@ -118,11 +131,13 @@ export class RollingSummarizer {
 
   // ---- internals -------------------------------------------------------
 
+  /** The oldest `windowSize` live (non-summarized) turns, or fewer if the buffer is short. */
   private nextWindow(): Turn[] {
     const live = this.buffer.liveTurns();
     return live.slice(0, Math.min(this.windowSize, live.length));
   }
 
+  /** Call the summarizer, ingest the produced SUMMARY, and mark the window summarized. */
   private async summarizeWindow(window: Turn[]): Promise<IngestOutcome> {
     const delta = await Promise.resolve(this.summarizer.summarize(window));
     const asset = this.buildSummaryAsset(window, delta);
@@ -131,6 +146,7 @@ export class RollingSummarizer {
     return outcome;
   }
 
+  /** Wrap a delta string in a fully-formed SUMMARY MemoryAsset with per-turn anchors. */
   private buildSummaryAsset(window: Turn[], delta: string): MemoryAsset {
     const first = window[0]!;
     const last = window[window.length - 1]!;
@@ -163,6 +179,7 @@ export class RollingSummarizer {
   }
 }
 
+/** Take the head of `content` up to `max` chars; never returns empty for non-empty input. */
 function anchorFor(content: string, max: number): string {
   if (content.length === 0) return content;
   if (content.length <= max) return content;

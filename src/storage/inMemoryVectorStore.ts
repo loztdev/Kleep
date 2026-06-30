@@ -18,6 +18,7 @@ function asArray<T>(v: T | readonly T[] | undefined): readonly T[] | undefined {
   return Array.isArray(v) ? (v as readonly T[]) : ([v as T] as const);
 }
 
+/** Cosine similarity in [-1, 1]; throws on dimension mismatch. */
 function cosine(a: readonly number[], b: readonly number[]): number {
   if (a.length !== b.length) {
     throw new Error(
@@ -38,10 +39,16 @@ function cosine(a: readonly number[], b: readonly number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
+/** In-memory `VectorStore` reference impl — cosine top-K over a linear scan. */
 export class InMemoryVectorStore implements VectorStore {
   private byId = new Map<string, LoreSnippet>();
   private dim: number | null = null;
 
+  /**
+   * Insert or replace a snippet. The first upsert fixes the store's
+   * embedding dimensionality; subsequent upserts (and queries) must
+   * match it.
+   */
   upsert(snippet: LoreSnippet): void {
     if (!snippet.embedding || snippet.embedding.length === 0) {
       throw new Error(
@@ -58,10 +65,15 @@ export class InMemoryVectorStore implements VectorStore {
     this.byId.set(snippet.id, snippet);
   }
 
+  /** Look up a snippet by id. */
   get(id: string): LoreSnippet | undefined {
     return this.byId.get(id);
   }
 
+  /**
+   * Top-K cosine search. Snippets failing the optional network / tag /
+   * viewpoint_holder filter are excluded before scoring.
+   */
   query(
     embedding: readonly number[],
     topK: number,
@@ -96,10 +108,12 @@ export class InMemoryVectorStore implements VectorStore {
     return scored.slice(0, topK);
   }
 
+  /** Remove a snippet by id; returns false if it wasn't there. */
   delete(id: string): boolean {
     return this.byId.delete(id);
   }
 
+  /** Number of stored snippets. */
   size(): number {
     return this.byId.size;
   }

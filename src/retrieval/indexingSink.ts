@@ -19,12 +19,19 @@
 import type { AnyAsset, IngestOutcome, IngestSink } from "../ingest";
 import type { FusionRecallEngine } from "./fusionRecallEngine";
 
+/** IngestSink decorator that mirrors writes into a `FusionRecallEngine`. */
 export class IndexingSink implements IngestSink {
+  /**
+   * @param inner   Underlying sink (e.g. `DedupReconciler`) that decides
+   *                the final asset shape.
+   * @param fusion  Retrieval engine to mirror writes into.
+   */
   constructor(
     private readonly inner: IngestSink,
     private readonly fusion: FusionRecallEngine,
   ) {}
 
+  /** Delegate ingest, then mirror the post-dedup asset into the retrieval indexes. */
   ingest(asset: AnyAsset): IngestOutcome {
     const outcome = this.inner.ingest(asset);
     this.fusion.index(outcome.asset);

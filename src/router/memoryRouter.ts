@@ -37,10 +37,12 @@ import { assertAllowed } from "./networkRules";
 // the alias here just for readability inside this file.
 type AnyAsset = MemoryAsset | WorldBibleEntry | LoreSnippet;
 
+/** Type-guard for `LoreSnippet` — true when the asset routes to the vector store. */
 function isLoreSnippet(asset: AnyAsset): asset is LoreSnippet {
   return asset.kind === MemoryKind.LORE;
 }
 
+/** Type-guard for `WorldBibleEntry` — true when the asset is a canonical entity card. */
 function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   return (
     asset.kind === MemoryKind.ENTITY &&
@@ -48,7 +50,12 @@ function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   );
 }
 
+/** Tier 1.3 single-entry-point router that enforces network rules and dispatches between stores. */
 export class MemoryRouter {
+  /**
+   * @param structured  Backing store for entries + non-LORE memory assets.
+   * @param vector      Backing store for LoreSnippets.
+   */
   constructor(
     private readonly structured: StructuredStore,
     private readonly vector: VectorStore,

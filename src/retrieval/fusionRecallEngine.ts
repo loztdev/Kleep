@@ -35,6 +35,7 @@ import { Bm25Index } from "./bm25";
 import { EntityIndex } from "./entityIndex";
 import { estimateTokensByChars, type TokenEstimator } from "./tokenBudget";
 
+/** Construction options for `FusionRecallEngine`. */
 export interface FusionRecallEngineOptions {
   router: MemoryRouter;
   embedder?: Embedder;
@@ -52,6 +53,7 @@ export interface FusionRecallEngineOptions {
   disposition?: Partial<DispositionMatrix>;
 }
 
+/** Per-call recall tuning: scope filters, channel toggles, budget. */
 export interface RecallOptions {
   topK?: number;
   /** Hard cap on the sum of estimated tokens across returned assets. */
@@ -69,6 +71,7 @@ export interface RecallOptions {
   disposition?: Partial<DispositionMatrix>;
 }
 
+/** One hit returned from `FusionRecallEngine.recall`. */
 export interface RecallResult {
   asset: AnyAsset;
   /** Fused RRF score (higher == more relevant). */
@@ -86,6 +89,7 @@ interface RankedHit {
   rank: number; // 0-indexed
 }
 
+/** Tier 3.6 4-channel recall engine combining vector + BM25 + entity + recency via RRF. */
 export class FusionRecallEngine {
   private readonly router: MemoryRouter;
   private readonly embedder?: Embedder;
@@ -125,6 +129,10 @@ export class FusionRecallEngine {
     this.recency.delete(id);
   }
 
+  /**
+   * Run the four-channel recall pipeline against `query`. Returns
+   * scoped, fused, and (if `tokenBudget` is set) trimmed results.
+   */
   async recall(
     query: string,
     opts: RecallOptions = {},
@@ -151,6 +159,7 @@ export class FusionRecallEngine {
 
   // ---- channels --------------------------------------------------------
 
+  /** Vector channel — semantic similarity via the configured embedder. */
   private async vectorChannel(
     query: string,
     opts: RecallOptions,
@@ -164,12 +173,14 @@ export class FusionRecallEngine {
     return hits.map((h, rank) => ({ id: h.snippet.id, rank }));
   }
 
+  /** BM25 channel — exact-keyword ranking. */
   private bm25Channel(query: string): RankedHit[] {
     return this.bm25
       .search(query, this.channelTopK)
       .map((h, rank) => ({ id: h.id, rank }));
   }
 
+  /** Entity-graph channel — assets referencing entities mentioned in the query. */
   private entityChannel(query: string): RankedHit[] {
     const mentioned = this.entities.mentionsIn(query);
     if (mentioned.length === 0) return [];
@@ -186,6 +197,7 @@ export class FusionRecallEngine {
     return ids.slice(0, this.channelTopK).map((id, rank) => ({ id, rank }));
   }
 
+  /** Recency channel — assets sorted by their latest turn key. */
   private chronologicalChannel(): RankedHit[] {
     return [...this.recency.entries()]
       .sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))
@@ -195,6 +207,7 @@ export class FusionRecallEngine {
 
   // ---- fusion ----------------------------------------------------------
 
+  /** Combine per-channel ranks via Reciprocal Rank Fusion. */
   private fuse(
     ranked: Partial<Record<Channel, RankedHit[]>>,
   ): Array<{ id: string; score: number; channels: Channel[] }> {
@@ -220,6 +233,7 @@ export class FusionRecallEngine {
       .sort((a, b) => b.score - a.score);
   }
 
+  /** Materialize fused ids into RecallResults and drop off-scope assets. */
   private hydrateAndFilter(
     fused: Array<{ id: string; score: number; channels: Channel[] }>,
     opts: RecallOptions,
@@ -271,6 +285,10 @@ export class FusionRecallEngine {
     return reweighted;
   }
 
+  /**
+   * Greedy token-budget trim. Drops hits whose tokens would push the
+   * running total past `tokenBudget`; respects `topK` as a hard ceiling.
+   */
   private applyBudget(
     hits: RecallResult[],
     opts: RecallOptions,
@@ -293,6 +311,7 @@ export class FusionRecallEngine {
 
 // ---- helpers ---------------------------------------------------------
 
+/** Text fed to BM25 for indexing — joins canonical names, aliases, content, and attributes. */
 function indexableText(asset: AnyAsset): string {
   if (isWorldBibleEntry(asset)) {
     const parts = [
@@ -308,6 +327,7 @@ function indexableText(asset: AnyAsset): string {
   return asset.content;
 }
 
+/** Type-guard for entity cards (asset kind === ENTITY + has entity_id). */
 function isWorldBibleEntry(a: AnyAsset): a is WorldBibleEntry {
   return (
     a.kind === MemoryKind.ENTITY &&
@@ -315,10 +335,12 @@ function isWorldBibleEntry(a: AnyAsset): a is WorldBibleEntry {
   );
 }
 
+/** Opaque turn key used to sort by recency — prefers last_updated_turn. */
 function recencyKey(asset: AnyAsset): string {
   return asset.last_updated_turn ?? asset.provenance.source_turn_id;
 }
 
+/** Best-effort string rendering for attribute values during indexing. */
 function stringify(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "string") return v;
@@ -330,6 +352,7 @@ function stringify(v: unknown): string {
   }
 }
 
+/** Normalize a scalar-or-array filter value into a readonly array (or undefined). */
 function asArray<T>(v: T | readonly T[] | undefined): readonly T[] | undefined {
   if (v === undefined) return undefined;
   return Array.isArray(v) ? (v as readonly T[]) : ([v as T] as const);

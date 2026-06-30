@@ -38,18 +38,22 @@ const PATTERNS = {
   opinion: new RegExp(`\\b(${NAME}) (?:thinks|believes) (.+?)\\.`, "g"),
 } as const;
 
+/** Construction options for `PatternExtractor`. */
 export interface PatternExtractorOptions {
   /** Confidence assigned to every match. Defaults to 0.7. */
   confidence?: number;
 }
 
+/** Deterministic regex extractor used by tests and as the default stub. */
 export class PatternExtractor implements Extractor {
   private readonly confidence: number;
 
+  /** @param opts.confidence  Score (0..1) tagged on every emitted fact. Default 0.7. */
   constructor(opts: PatternExtractorOptions = {}) {
     this.confidence = opts.confidence ?? 0.7;
   }
 
+  /** Run every supported regex pattern over `turn.content` and emit results. */
   extract(turn: Turn): readonly ExtractedFact[] {
     const out: ExtractedFact[] = [];
     for (const m of matches(turn.content, PATTERNS.entity)) {
@@ -95,6 +99,7 @@ export class PatternExtractor implements Extractor {
     return out;
   }
 
+  /** Build an `ExtractedEntity` from a captured (name, type-word) pair. */
   private entity(name: string, kindWord: string, quote: string): ExtractedEntity {
     return {
       type: "entity",
@@ -116,6 +121,7 @@ export class PatternExtractor implements Extractor {
     };
   }
 
+  /** Tack `type: "atomic"` and the engine's confidence onto a partial atomic spec. */
   private atomic(
     spec: Omit<ExtractedAtomicFact, "type" | "confidence">,
   ): ExtractedAtomicFact {
@@ -123,6 +129,7 @@ export class PatternExtractor implements Extractor {
   }
 }
 
+/** Iterator over every regex match in `s`, with zero-width step protection. */
 function* matches(s: string, re: RegExp): Generator<RegExpExecArray> {
   re.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -132,6 +139,7 @@ function* matches(s: string, re: RegExp): Generator<RegExpExecArray> {
   }
 }
 
+/** Pick "believes" or "thinks" to render in the canonicalized opinion content. */
 function claimVerb(matched: string): string {
   return matched.includes(" believes ") ? "believes" : "thinks";
 }

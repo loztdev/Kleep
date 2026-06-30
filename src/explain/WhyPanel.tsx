@@ -16,6 +16,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ProvenanceBundle } from "./types";
 
+/** Props for the `WhyPanel` component. */
 export interface WhyPanelProps {
   bundle: ProvenanceBundle;
   /** Called when the user taps an anchor's "go to turn" affordance. */
@@ -25,12 +26,11 @@ export interface WhyPanelProps {
 }
 
 /**
- * Renders a provenance card with optional evidence expansion.
+ * Render a `ProvenanceBundle` as an expandable epistemic-trace card.
  *
  * @param bundle - The provenance data to display.
  * @param onJumpToTurn - Called with an anchor turn ID when an evidence item is pressed.
  * @param compact - Whether the card starts collapsed and hides the expand/collapse toggle.
- * @returns The rendered provenance panel.
  */
 export function WhyPanel({
   bundle,
@@ -119,12 +119,7 @@ export function WhyPanel({
   );
 }
 
-/**
- * Displays the bundle's confidence score as a badge.
- *
- * @param bundle - The provenance bundle used to derive the displayed score and tone.
- * @returns A confidence badge element showing the score as a percentage.
- */
+/** Small traffic-light chip showing confidence as a percentage. */
 function ConfidenceChip({
   bundle,
 }: {
@@ -142,12 +137,7 @@ function ConfidenceChip({
   );
 }
 
-/**
- * Chooses the chip colors for a confidence score.
- *
- * @param score - Confidence score between 0 and 1
- * @returns The background and text colors for the confidence chip
- */
+/** Pick a (background, foreground) color pair for a confidence score. */
 function chipTone(score: number): { bg: string; fg: string } {
   if (score >= 0.8) return { bg: "#1f8a3b", fg: "#fff" };
   if (score >= 0.5) return { bg: "#c2a000", fg: "#222" };
