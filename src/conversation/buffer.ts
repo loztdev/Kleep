@@ -37,7 +37,6 @@ export class ConversationBuffer {
   }
 
   /** Total number of turns appended (processed or not). */
-  /** Total number of turns appended (processed or not). */
   size(): number {
     return this.turns.length;
   }

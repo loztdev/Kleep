@@ -9,7 +9,7 @@
 
 const HEX = "0123456789abcdef";
 
-/** Generate a 32-char hex id for in-memory work; swap for crypto-strong in production. */
+/** Generate a 32-char hex id for persisted assets; swap for crypto-strong in production. */
 export function newId(): string {
   // 32 hex chars (~UUID-sized) using Math.random — sufficient for the
   // schema layer; storage can override at write time.

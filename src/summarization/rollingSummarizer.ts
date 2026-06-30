@@ -76,19 +76,15 @@ export class RollingSummarizer {
   ) {
     if (opts.windowSize <= 0) throw new Error("windowSize must be > 0");
     if (opts.threshold <= 0) throw new Error("threshold must be > 0");
+    const anchorChars = opts.anchorChars ?? 64;
+    if (anchorChars <= 0) throw new Error("anchorChars must be > 0");
     this.threshold = opts.threshold;
     this.windowSize = opts.windowSize;
     this.estimateTokens = opts.estimateTokens ?? estimateTokensByChars;
     this.summaryNetwork = opts.summaryNetwork ?? Network.EXPERIENCE;
-    this.anchorChars = opts.anchorChars ?? 64;
+    this.anchorChars = anchorChars;
   }
 
-  /**
-   * Run as many summarization passes as the current backlog warrants.
-   * Each pass takes one window of `windowSize` turns; loops until the
-   * live-token count drops back under the threshold (or no live turns
-   * remain).
-   */
   /**
    * Repeatedly summarize the oldest live window while live tokens
    * exceed the configured threshold. Each pass consumes `windowSize`
@@ -111,10 +107,6 @@ export class RollingSummarizer {
     return { summariesProduced, outcomes };
   }
 
-  /**
-   * Force-summarize the oldest live window right now, regardless of
-   * the threshold. Useful at conversation boundaries / shutdown.
-   */
   /**
    * Summarize the oldest live window unconditionally. Useful at
    * conversation boundaries or shutdown — runs one pass even if the
