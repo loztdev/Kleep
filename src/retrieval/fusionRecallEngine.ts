@@ -25,7 +25,12 @@ import type { Embedder } from "../embedding";
 import type { AnyAsset } from "../ingest";
 import { MemoryKind, type WorldBibleEntry } from "../schema";
 import type { MemoryRouter } from "../router";
-import type { Network } from "../schema";
+import { Network } from "../schema";
+import {
+  withDefaults,
+  worldBoostMultiplier,
+  type DispositionMatrix,
+} from "../disposition";
 import { Bm25Index } from "./bm25";
 import { EntityIndex } from "./entityIndex";
 import { estimateTokensByChars, type TokenEstimator } from "./tokenBudget";
@@ -39,6 +44,12 @@ export interface FusionRecallEngineOptions {
   channelTopK?: number;
   /** Token estimator for budgeted recall (defaults to chars/4). */
   estimateTokens?: TokenEstimator;
+  /**
+   * Tier 4.10 — literalism slider. Boosts the fused score of WORLD-
+   * network assets so hard rules outrank softer LORE/OPINION at
+   * retrieval time. Default is neutral (literalism=0 → no boost).
+   */
+  disposition?: Partial<DispositionMatrix>;
 }
 
 export interface RecallOptions {
@@ -54,6 +65,8 @@ export interface RecallOptions {
     entity?: boolean;
     chronological?: boolean;
   };
+  /** Per-call disposition override (otherwise the engine's default). */
+  disposition?: Partial<DispositionMatrix>;
 }
 
 export interface RecallResult {
@@ -79,6 +92,7 @@ export class FusionRecallEngine {
   private readonly rrfK: number;
   private readonly channelTopK: number;
   private readonly estimateTokens: TokenEstimator;
+  private readonly disposition: DispositionMatrix;
 
   private readonly bm25 = new Bm25Index();
   private readonly entities = new EntityIndex();
@@ -91,6 +105,7 @@ export class FusionRecallEngine {
     this.rrfK = opts.rrfK ?? 60;
     this.channelTopK = opts.channelTopK ?? 50;
     this.estimateTokens = opts.estimateTokens ?? estimateTokensByChars;
+    this.disposition = withDefaults(opts.disposition);
   }
 
   /**
@@ -130,7 +145,8 @@ export class FusionRecallEngine {
 
     const fused = this.fuse(ranked);
     const hydrated = this.hydrateAndFilter(fused, opts);
-    return this.applyBudget(hydrated, opts);
+    const boosted = this.applyLiteralism(hydrated, opts);
+    return this.applyBudget(boosted, opts);
   }
 
   // ---- channels --------------------------------------------------------
@@ -228,6 +244,31 @@ export class FusionRecallEngine {
       });
     }
     return out;
+  }
+
+  /**
+   * Tier 4.10 — literalism boost.
+   *
+   * Multiplies WORLD-network scores by `worldBoostMultiplier`. Per-call
+   * disposition (if supplied) wins over the engine's default so the
+   * UI's slider can dial it live without rebuilding the engine.
+   */
+  private applyLiteralism(
+    hits: RecallResult[],
+    opts: RecallOptions,
+  ): RecallResult[] {
+    const d = opts.disposition
+      ? withDefaults({ ...this.disposition, ...opts.disposition })
+      : this.disposition;
+    const boost = worldBoostMultiplier(d);
+    if (boost === 1) return hits;
+    const reweighted = hits.map((h) =>
+      h.asset.network === Network.WORLD
+        ? { ...h, score: h.score * boost }
+        : h,
+    );
+    reweighted.sort((a, b) => b.score - a.score);
+    return reweighted;
   }
 
   private applyBudget(
