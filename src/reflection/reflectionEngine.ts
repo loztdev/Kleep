@@ -179,15 +179,34 @@ export class ReflectionEngine {
   }
 }
 
+/**
+ * Determines whether a value is a World Bible entity entry.
+ *
+ * @returns `true` if the value has `kind` set to `MemoryKind.ENTITY` and an `entity_id`, `false` otherwise.
+ */
 function isWorldBibleEntry(a: unknown): a is WorldBibleEntry {
   const obj = a as { kind?: string; entity_id?: string };
   return obj.kind === MemoryKind.ENTITY && obj.entity_id !== undefined;
 }
 
+/**
+ * Constrains a number to an inclusive range.
+ *
+ * @param v - The value to constrain
+ * @param lo - The lower bound
+ * @param hi - The upper bound
+ * @returns `v` constrained to the range from `lo` to `hi`
+ */
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/**
+ * Returns a quote anchor snippet for the given content.
+ *
+ * @param content - The source text to shorten for anchoring
+ * @returns `"(empty)"` when `content` is empty; otherwise `content` truncated to 80 characters or fewer
+ */
 function anchorQuoteFor(content: string): string {
   const max = 80;
   if (content.length === 0) return "(empty)";
