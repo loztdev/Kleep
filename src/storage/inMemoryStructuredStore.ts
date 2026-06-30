@@ -36,6 +36,13 @@ export class InMemoryStructuredStore implements StructuredStore {
   private byKind = new Map<MemoryKind, Set<string>>();
   private byTag = new Map<string, Set<string>>();
   private byViewpoint = new Map<string, Set<string>>();
+  /**
+   * Reverse index for entity references — populated from BOTH a
+   * WorldBibleEntry's own `entity_id` AND any asset's `entity_ids`
+   * array, so query({ entity_id }) finds the entity card and every
+   * fact that mentions it.
+   */
+  private byEntityRef = new Map<string, Set<string>>();
 
   put(asset: MemoryAsset): void {
     this.replace(asset);
@@ -117,6 +124,9 @@ export class InMemoryStructuredStore implements StructuredStore {
     if (asset.viewpoint_holder) {
       bucket(this.byViewpoint, asset.viewpoint_holder).add(asset.id);
     }
+    for (const ref of this.entityRefs(asset)) {
+      bucket(this.byEntityRef, ref).add(asset.id);
+    }
   }
 
   private unindex(asset: Stored): void {
@@ -126,6 +136,15 @@ export class InMemoryStructuredStore implements StructuredStore {
     if (asset.viewpoint_holder) {
       discard(this.byViewpoint.get(asset.viewpoint_holder), asset.id);
     }
+    for (const ref of this.entityRefs(asset)) {
+      discard(this.byEntityRef.get(ref), asset.id);
+    }
+  }
+
+  private entityRefs(asset: Stored): Set<string> {
+    const refs = new Set<string>(asset.entity_ids);
+    if (isWorldBibleEntry(asset)) refs.add(asset.entity_id);
+    return refs;
   }
 
   /**
@@ -137,9 +156,9 @@ export class InMemoryStructuredStore implements StructuredStore {
     const sets: Array<Set<string> | undefined> = [];
 
     if (filter.entity_id !== undefined) {
-      const entry = this.byEntityId.get(filter.entity_id);
-      if (!entry) return null;
-      return [entry.id];
+      // Use the union index so both the entity card AND any asset that
+      // references the entity via entity_ids are surfaced.
+      sets.push(this.byEntityRef.get(filter.entity_id));
     }
     if (filter.tag !== undefined) sets.push(this.byTag.get(filter.tag));
     if (filter.viewpoint_holder !== undefined) {

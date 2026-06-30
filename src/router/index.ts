@@ -8,4 +8,4 @@ export {
   assertAllowed,
   isAllowed,
 } from "./networkRules";
-export { MemoryRouter, type AnyAsset } from "./memoryRouter";
+export { MemoryRouter } from "./memoryRouter";
