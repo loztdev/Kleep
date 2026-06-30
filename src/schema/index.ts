@@ -28,6 +28,7 @@ export {
   MemoryAssetSchema,
   MemoryKind,
   MemoryKindSchema,
+  withOpinionViewpointRule,
   withRelevance,
 } from "./memory";
 export type { MemoryAsset } from "./memory";

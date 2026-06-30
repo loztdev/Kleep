@@ -3,15 +3,18 @@
  *
  * A LoreSnippet is the unit the embedding/retrieval pipeline (Tier 3.6)
  * will operate on. We don't compute embeddings here — that's the storage
- * layer's job — but we leave a slot so the schema is shape-stable when
- * Tier 1.2 lands.
+ * layer's job — but we leave a slot so the schema is shape-stable.
  */
 
 import { z } from "zod";
 
-import { MemoryAssetBaseSchema, MemoryKind } from "./memory";
+import {
+  MemoryAssetBaseSchema,
+  MemoryKind,
+  withOpinionViewpointRule,
+} from "./memory";
 
-export const LoreSnippetSchema = MemoryAssetBaseSchema.extend({
+const LoreSnippetObjectSchema = MemoryAssetBaseSchema.extend({
   kind: z.literal(MemoryKind.LORE).default(MemoryKind.LORE),
   title: z.string().optional(),
   // Embeddings are populated by the vector store at write time; the
@@ -19,5 +22,9 @@ export const LoreSnippetSchema = MemoryAssetBaseSchema.extend({
   embedding: z.array(z.number()).optional(),
   embedding_model: z.string().optional(),
 }).strict();
+
+export const LoreSnippetSchema = withOpinionViewpointRule(
+  LoreSnippetObjectSchema,
+);
 
 export type LoreSnippet = z.infer<typeof LoreSnippetSchema>;
