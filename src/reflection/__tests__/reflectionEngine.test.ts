@@ -66,8 +66,8 @@ describe("ReflectionEngine.tick — contradiction", () => {
     expect(reflections[0]!.tags).toContain("cara:contradiction");
 
     // Confidence should drop on whichever opinion was the primary.
-    const lowered =
-      h.router.read(alice.id) ?? h.router.read(bob.id);
+    const primaryId = res.findings[0]!.primary_asset_id;
+    const lowered = h.router.read(primaryId);
     expect(lowered!.provenance.confidence_score).toBeLessThan(0.9);
   });
 });

@@ -94,7 +94,7 @@ export class ReflectionEngine {
 
   private gatherInput(): ReflectionInput {
     const opinions = this.router
-      .query({ network: Network.OPINION })
+      .query({ network: Network.OPINION, kind: MemoryKind.OPINION })
       .filter((a): a is MemoryAsset => !isWorldBibleEntry(a));
     const facts = this.router
       .query({
@@ -161,6 +161,7 @@ export class ReflectionEngine {
         provenance: {
           ...primary.provenance,
           confidence_score: adjusted,
+          confidence_source: ConfidenceSource.DERIVED,
         },
       };
       this.router.write(updated);

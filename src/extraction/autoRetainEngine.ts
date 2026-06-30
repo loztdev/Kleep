@@ -169,12 +169,11 @@ export class AutoRetainEngine {
 
     const required = mentionsRequired(this.disposition);
     const key = pendingKey(asset);
-    const count = (this.pendingMentions.get(key) ?? 0) + 1;
+    const count = this.pendingMentions.get(key) ?? 0;
     if (count >= required) {
-      this.pendingMentions.delete(key);
       return true;
     }
-    this.pendingMentions.set(key, count);
+    this.pendingMentions.set(key, count + 1);
     return false;
   }
 

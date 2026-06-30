@@ -25,10 +25,10 @@ export interface DispositionMatrix {
   literalism: number;
 }
 
-export const NEUTRAL_DISPOSITION: DispositionMatrix = {
+export const NEUTRAL_DISPOSITION: DispositionMatrix = Object.freeze({
   skepticism: 0,
   literalism: 0,
-};
+});
 
 /**
  * Creates a complete disposition matrix with bounded values.

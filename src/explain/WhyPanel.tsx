@@ -49,68 +49,72 @@ export function WhyPanel({
         <ConfidenceChip bundle={bundle} />
       </View>
 
-      <View style={styles.metaRow}>
-        <Text style={styles.metaText}>{bundle.subject.kind}</Text>
-        <Text style={styles.metaDot}>·</Text>
-        <Text style={styles.metaText}>{bundle.subject.network}</Text>
-        {bundle.viewpoint_holder ? (
-          <>
+      {!compact ? (
+        <>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>{bundle.subject.kind}</Text>
+            <Text style={styles.metaDot}>·</Text>
+            <Text style={styles.metaText}>{bundle.subject.network}</Text>
+            {bundle.viewpoint_holder ? (
+              <>
+                <Text style={styles.metaDot}>·</Text>
+                <Text style={styles.metaText}>
+                  POV: {bundle.viewpoint_holder}
+                </Text>
+              </>
+            ) : null}
             <Text style={styles.metaDot}>·</Text>
             <Text style={styles.metaText}>
-              POV: {bundle.viewpoint_holder}
+              {bundle.corroboration} witness
+              {bundle.corroboration === 1 ? "" : "es"}
             </Text>
-          </>
-        ) : null}
-        <Text style={styles.metaDot}>·</Text>
-        <Text style={styles.metaText}>
-          {bundle.corroboration} witness
-          {bundle.corroboration === 1 ? "" : "es"}
-        </Text>
-      </View>
+          </View>
 
-      {showToggle ? (
-        <Pressable
-          onPress={() => setExpanded((v) => !v)}
-          accessibilityRole="button"
-          accessibilityLabel={expanded ? "Hide evidence" : "Show evidence"}
-          style={styles.toggle}
-        >
-          <Text style={styles.toggleText}>
-            {expanded ? "Hide evidence" : "Show evidence"}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {expanded ? (
-        <View style={styles.anchorList}>
-          {bundle.anchors.map((a, i) => (
+          {showToggle ? (
             <Pressable
-              key={`${a.turn_id}:${i}`}
-              onPress={
-                onJumpToTurn ? () => onJumpToTurn(a.turn_id) : undefined
-              }
-              accessibilityRole={onJumpToTurn ? "button" : undefined}
-              accessibilityLabel={`Evidence from turn ${a.turn_id}`}
-              style={styles.anchor}
+              onPress={() => setExpanded((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={expanded ? "Hide evidence" : "Show evidence"}
+              style={styles.toggle}
             >
-              <Text style={styles.anchorTurn}>turn {a.turn_id}</Text>
-              <Text style={styles.anchorQuote}>“{a.quote}”</Text>
+              <Text style={styles.toggleText}>
+                {expanded ? "Hide evidence" : "Show evidence"}
+              </Text>
             </Pressable>
-          ))}
-        </View>
-      ) : null}
+          ) : null}
 
-      {bundle.temporal.narrative_always ? (
-        <Text style={styles.footer}>Timeless (world rule)</Text>
-      ) : bundle.temporal.turn_end ? (
-        <Text style={styles.footer}>
-          Valid {bundle.temporal.turn_start} → {bundle.temporal.turn_end}
-        </Text>
-      ) : (
-        <Text style={styles.footer}>
-          Since {bundle.temporal.turn_start}
-        </Text>
-      )}
+          {expanded ? (
+            <View style={styles.anchorList}>
+              {bundle.anchors.map((a, i) => (
+                <Pressable
+                  key={`${a.turn_id}:${i}`}
+                  onPress={
+                    onJumpToTurn ? () => onJumpToTurn(a.turn_id) : undefined
+                  }
+                  accessibilityRole={onJumpToTurn ? "button" : undefined}
+                  accessibilityLabel={`Evidence from turn ${a.turn_id}`}
+                  style={styles.anchor}
+                >
+                  <Text style={styles.anchorTurn}>turn {a.turn_id}</Text>
+                  <Text style={styles.anchorQuote}>"{a.quote}"</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {bundle.temporal.narrative_always ? (
+            <Text style={styles.footer}>Timeless (world rule)</Text>
+          ) : bundle.temporal.turn_end ? (
+            <Text style={styles.footer}>
+              Valid {bundle.temporal.turn_start} → {bundle.temporal.turn_end}
+            </Text>
+          ) : (
+            <Text style={styles.footer}>
+              Since {bundle.temporal.turn_start}
+            </Text>
+          )}
+        </>
+      ) : null}
     </View>
   );
 }
