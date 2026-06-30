@@ -11,16 +11,21 @@
 
 import { tokenize } from "./tokenize";
 
+/** One ranked hit from `Bm25Index.search`. */
 export interface Bm25SearchResult {
   id: string;
   score: number;
 }
 
+/** Tunable BM25 parameters. Defaults follow the Lucene/Okapi convention. */
 export interface Bm25Options {
+  /** Term-frequency saturation. Default 1.5. */
   k1?: number;
+  /** Length-normalization weight in [0, 1]. Default 0.75. */
   b?: number;
 }
 
+/** In-memory BM25 inverted index — exact-keyword channel of the fusion engine. */
 export class Bm25Index {
   private readonly k1: number;
   private readonly b: number;
@@ -31,11 +36,16 @@ export class Bm25Index {
   private docLen = new Map<string, number>();
   private totalLen = 0;
 
+  /** Construct an empty index with optional parameter overrides. */
   constructor(opts: Bm25Options = {}) {
     this.k1 = opts.k1 ?? 1.5;
     this.b = opts.b ?? 0.75;
   }
 
+  /**
+   * Add or replace a document. Calling `add` with an id that already
+   * exists fully replaces its prior content (no double-counting).
+   */
   add(id: string, text: string): void {
     if (this.docLen.has(id)) this.remove(id);
     const tokens = tokenize(text);
@@ -52,6 +62,7 @@ export class Bm25Index {
     this.totalLen += tokens.length;
   }
 
+  /** Remove a document from the index; returns false if unknown. */
   remove(id: string): boolean {
     const len = this.docLen.get(id);
     if (len === undefined) return false;
@@ -65,10 +76,12 @@ export class Bm25Index {
     return true;
   }
 
+  /** Number of indexed documents. */
   size(): number {
     return this.docLen.size;
   }
 
+  /** Top-K BM25 scoring over the indexed corpus for the tokenized query. */
   search(query: string, topK: number): Bm25SearchResult[] {
     if (topK <= 0 || this.docLen.size === 0) return [];
     const terms = tokenize(query);
@@ -99,6 +112,7 @@ export class Bm25Index {
   }
 }
 
+/** Lazy-init a nested Map bucket and return it. */
 function bucket<K, V>(m: Map<K, Map<string, V>>, k: K): Map<string, V> {
   let s = m.get(k);
   if (!s) {

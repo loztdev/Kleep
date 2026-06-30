@@ -14,6 +14,7 @@ import {
   withOpinionViewpointRule,
 } from "./memory";
 
+/** Internal object schema; the public export wraps it with the viewpoint rule. */
 const LoreSnippetObjectSchema = MemoryAssetBaseSchema.extend({
   kind: z.literal(MemoryKind.LORE).default(MemoryKind.LORE),
   title: z.string().optional(),
@@ -23,8 +24,10 @@ const LoreSnippetObjectSchema = MemoryAssetBaseSchema.extend({
   embedding_model: z.string().optional(),
 }).strict();
 
+/** Zod validator for a prose lore fragment headed for the vector store. */
 export const LoreSnippetSchema = withOpinionViewpointRule(
   LoreSnippetObjectSchema,
 );
 
+/** Inferred TS type for a validated `LoreSnippet`. */
 export type LoreSnippet = z.infer<typeof LoreSnippetSchema>;

@@ -14,6 +14,7 @@ import type { Turn } from "./types";
 // without creating a cross-layer import. We intentionally don't export.
 type TokenEstimator = (text: string) => number;
 
+/** Append-only log of turns with extraction + summarization marks. */
 export class ConversationBuffer {
   private turns: Turn[] = [];
   private byId = new Map<string, Turn>();
@@ -26,6 +27,7 @@ export class ConversationBuffer {
    */
   private summarized = new Set<string>();
 
+  /** Add a turn to the log. Throws on duplicate id. */
   append(turn: Turn): void {
     if (this.byId.has(turn.id)) {
       throw new Error(`duplicate turn id: ${turn.id}`);
@@ -39,6 +41,7 @@ export class ConversationBuffer {
     return this.turns.length;
   }
 
+  /** Look up a turn by id. */
   get(id: string): Turn | undefined {
     return this.byId.get(id);
   }

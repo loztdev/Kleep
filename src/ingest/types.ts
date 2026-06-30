@@ -12,14 +12,17 @@ import type {
   WorldBibleEntry,
 } from "../schema";
 
+/** Discriminated union of every concrete asset shape Kleep ingests. */
 export type AnyAsset = MemoryAsset | WorldBibleEntry | LoreSnippet;
 
+/** What an `IngestSink` did with the asset it received. */
 export type IngestOutcomeKind =
   | "created"        // new asset, written as-is
   | "bumped"         // exact duplicate; relevance incremented on existing
   | "merged"         // attributes folded into an existing entry
   | "state_changed"; // an attribute value changed (state delta)
 
+/** Outcome of a single sink ingest call: what happened and the final asset shape. */
 export interface IngestOutcome {
   kind: IngestOutcomeKind;
   /** The asset as it now lives in storage. */
@@ -28,6 +31,8 @@ export interface IngestOutcome {
   details?: Record<string, unknown>;
 }
 
+/** Anything that accepts an asset for persistence — router, reconciler, decorator. */
 export interface IngestSink {
+  /** Accept `asset`, persist it (or merge it), return what happened. */
   ingest(asset: AnyAsset): IngestOutcome;
 }

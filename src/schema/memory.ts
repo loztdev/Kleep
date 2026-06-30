@@ -27,8 +27,10 @@ export const MemoryKind = {
   OPINION: "opinion",
 } as const;
 
+/** String-literal union for the `MemoryKind` enum. */
 export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
 
+/** Zod validator for the `MemoryKind` enum. */
 export const MemoryKindSchema = z.enum([
   MemoryKind.FACT,
   MemoryKind.ENTITY,
@@ -93,7 +95,9 @@ export function withOpinionViewpointRule<S extends z.ZodTypeAny>(
   });
 }
 
+/** Public schema for any non-entity, non-lore memory asset. */
 export const MemoryAssetSchema = withOpinionViewpointRule(MemoryAssetBaseSchema);
+/** Inferred TS type for a validated `MemoryAsset`. */
 export type MemoryAsset = z.infer<typeof MemoryAssetSchema>;
 
 /**

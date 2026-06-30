@@ -25,17 +25,13 @@ export interface DispositionMatrix {
   literalism: number;
 }
 
+/** No-op matrix — engines behave as if no disposition were configured. */
 export const NEUTRAL_DISPOSITION: DispositionMatrix = Object.freeze({
   skepticism: 0,
   literalism: 0,
 });
 
-/**
- * Creates a complete disposition matrix with bounded values.
- *
- * @param partial - Optional disposition values to override the defaults
- * @returns A disposition matrix with `skepticism` and `literalism` clamped to the range from 0 to 1
- */
+/** Merge a partial matrix onto `NEUTRAL_DISPOSITION` and clamp each slider into [0, 1]. */
 export function withDefaults(
   partial?: Partial<DispositionMatrix>,
 ): DispositionMatrix {

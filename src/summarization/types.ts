@@ -9,6 +9,7 @@
 
 import type { Turn } from "../conversation";
 
+/** Pluggable summarizer — StubSummarizer (deterministic) or LLM-backed. */
 export interface Summarizer {
   /**
    * Produce a compressed delta covering `turns`. Returns the raw delta

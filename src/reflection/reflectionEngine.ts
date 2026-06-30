@@ -40,6 +40,7 @@ import type {
   ReflectionInput,
 } from "./types";
 
+/** Construction options for `ReflectionEngine`. */
 export interface ReflectionEngineOptions {
   /** Network for emitted REFLECTION assets. Defaults to OBSERVATION. */
   reflectionNetwork?: Network;
@@ -49,12 +50,14 @@ export interface ReflectionEngineOptions {
   minConfidence?: number;
 }
 
+/** Summary returned from one `ReflectionEngine.tick()` call. */
 export interface ReflectionTickResult {
   findings: readonly ReflectionFinding[];
   outcomes: IngestOutcome[];
   adjustedAssets: number;
 }
 
+/** Tier 4.9 CARA orchestrator — scans opinions/facts, emits REFLECTION assets. */
 export class ReflectionEngine {
   private readonly reflectionNetwork: Network;
   private readonly maxConfidence: number;
@@ -71,6 +74,12 @@ export class ReflectionEngine {
     this.minConfidence = opts.minConfidence ?? 0.05;
   }
 
+  /**
+   * Run one reflection pass: gather opinions + supporting facts/entries,
+   * call the reflector, emit REFLECTION assets and apply effects.
+   * Idempotent at conversation idle — call as often as the host scheduler
+   * decides.
+   */
   async tick(): Promise<ReflectionTickResult> {
     const input = this.gatherInput();
     if (input.opinions.length === 0) {
@@ -92,6 +101,7 @@ export class ReflectionEngine {
 
   // ---- internals -------------------------------------------------------
 
+  /** Pull the three input sets the Reflector consumes: opinions, facts, entries. */
   private gatherInput(): ReflectionInput {
     const opinions = this.router
       .query({ network: Network.OPINION, kind: MemoryKind.OPINION })
@@ -108,6 +118,7 @@ export class ReflectionEngine {
     return { opinions, facts, entries };
   }
 
+  /** Build and ingest a REFLECTION MemoryAsset anchored to the primary opinion. */
   private emitReflection(
     finding: ReflectionFinding,
     primary: MemoryAsset,
@@ -142,6 +153,10 @@ export class ReflectionEngine {
     return this.sink.ingest(asset);
   }
 
+  /**
+   * Apply the finding's side-effect (confidence/relevance delta) to the
+   * primary asset. Returns true iff the asset actually changed.
+   */
   private applyEffect(
     finding: ReflectionFinding,
     primary: MemoryAsset,
@@ -181,32 +196,24 @@ export class ReflectionEngine {
 }
 
 /**
- * Determines whether a value is a World Bible entity entry.
+ * Type-guard for entity cards used inside this module.
  *
- * @returns `true` if the value has `kind` set to `MemoryKind.ENTITY` and an `entity_id`, `false` otherwise.
+ * @returns `true` if the value has `kind === MemoryKind.ENTITY` and an `entity_id`.
  */
 function isWorldBibleEntry(a: unknown): a is WorldBibleEntry {
   const obj = a as { kind?: string; entity_id?: string };
   return obj.kind === MemoryKind.ENTITY && obj.entity_id !== undefined;
 }
 
-/**
- * Constrains a number to an inclusive range.
- *
- * @param v - The value to constrain
- * @param lo - The lower bound
- * @param hi - The upper bound
- * @returns `v` constrained to the range from `lo` to `hi`
- */
+/** Numeric clamp into `[lo, hi]`. */
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
 /**
- * Returns a quote anchor snippet for the given content.
+ * Build a short anchor quote from the primary asset's content.
  *
- * @param content - The source text to shorten for anchoring
- * @returns `"(empty)"` when `content` is empty; otherwise `content` truncated to 80 characters or fewer
+ * @returns `"(empty)"` for empty content; otherwise `content` truncated to ≤80 chars.
  */
 function anchorQuoteFor(content: string): string {
   const max = 80;

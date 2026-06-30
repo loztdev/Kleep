@@ -15,12 +15,14 @@
 
 import type { WorldBibleEntry } from "../schema";
 
+/** Lookup from entity name/alias → entity_id, with word-bounded mention scanning. */
 export class EntityIndex {
   /** lowercase name → entity_ids (Set, because aliases can collide) */
   private byName = new Map<string, Set<string>>();
   /** entity_id → all names currently registered for it */
   private byEntity = new Map<string, Set<string>>();
 
+  /** Register an entity's canonical name + aliases. Re-add replaces. */
   add(entry: WorldBibleEntry): void {
     this.remove(entry.entity_id); // re-add is replace
     const names = new Set<string>([
@@ -35,6 +37,7 @@ export class EntityIndex {
     }
   }
 
+  /** Drop an entity from the index; returns false if unknown. */
   remove(entityId: string): boolean {
     const names = this.byEntity.get(entityId);
     if (!names) return false;
@@ -50,10 +53,12 @@ export class EntityIndex {
     return true;
   }
 
+  /** Number of registered entities. */
   size(): number {
     return this.byEntity.size;
   }
 
+  /** Exact (case-insensitive) lookup — every entity that uses this name. */
   idsForName(name: string): readonly string[] {
     const set = this.byName.get(name.toLowerCase());
     return set ? [...set] : [];
@@ -91,6 +96,7 @@ export class EntityIndex {
   }
 }
 
+/** Lazy-init a Set bucket inside a Map. */
 function bucket<K, V>(m: Map<K, Set<V>>, k: K): Set<V> {
   let s = m.get(k);
   if (!s) {
@@ -100,12 +106,14 @@ function bucket<K, V>(m: Map<K, Set<V>>, k: K): Set<V> {
   return s;
 }
 
+/** True iff `[start, end)` in `s` is flanked by non-word characters. */
 function isWordBounded(s: string, start: number, end: number): boolean {
   const before = start === 0 ? "" : s[start - 1]!;
   const after = end === s.length ? "" : s[end]!;
   return !isWordChar(before) && !isWordChar(after);
 }
 
+/** Treat a-z, 0-9, apostrophe, and hyphen as word characters. */
 function isWordChar(c: string): boolean {
   if (c === "") return false;
   const code = c.charCodeAt(0);
@@ -117,6 +125,7 @@ function isWordChar(c: string): boolean {
   );
 }
 
+/** True if `[a, b)` overlaps any previously-claimed `[start, end)` span. */
 function overlaps(
   claimed: ReadonlyArray<[number, number]>,
   a: number,

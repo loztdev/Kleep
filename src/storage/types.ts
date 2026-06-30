@@ -28,6 +28,10 @@ import type {
   WorldBibleEntry,
 } from "../schema";
 
+/**
+ * Combined predicate accepted by `StructuredStore.query`. All supplied
+ * fields are AND-ed together; omitted fields are wildcards.
+ */
 export interface StructuredQuery {
   network?: Network | readonly Network[];
   kind?: MemoryKind | readonly MemoryKind[];
@@ -36,34 +40,54 @@ export interface StructuredQuery {
   viewpoint_holder?: string;
 }
 
+/**
+ * Persistence contract for structured assets (World Bible entries +
+ * the FACT/RULE/SUMMARY/REFLECTION/OPINION buckets). Implementations:
+ * `InMemoryStructuredStore` (this tier) and `expo-sqlite` (future).
+ */
 export interface StructuredStore {
   /** Insert or replace a structured memory asset. */
   put(asset: MemoryAsset): void;
   /** Insert or replace a full World Bible entry. */
   putEntry(entry: WorldBibleEntry): void;
 
+  /** Fetch any stored asset by its id. */
   get(id: string): MemoryAsset | WorldBibleEntry | undefined;
+  /** Fetch an entity card by its `entity_id`. */
   getEntry(entityId: string): WorldBibleEntry | undefined;
 
+  /** Run a filter query and return matching assets, unordered. */
   query(filter: StructuredQuery): Array<MemoryAsset | WorldBibleEntry>;
 
+  /** Remove an asset by id; returns true if it existed. */
   delete(id: string): boolean;
 
+  /** Number of stored assets. */
   size(): number;
 }
 
+/**
+ * Filter accepted by `VectorStore.query`. Same AND-then-wildcard
+ * semantics as `StructuredQuery`.
+ */
 export interface VectorQueryFilter {
   network?: Network | readonly Network[];
   tag?: string;
   viewpoint_holder?: string;
 }
 
+/** One ranked hit from a vector query. */
 export interface VectorSearchResult {
   snippet: LoreSnippet;
   /** Cosine similarity in [-1, 1] — higher is more similar. */
   score: number;
 }
 
+/**
+ * Persistence contract for semantically-indexed `LoreSnippet`s.
+ * Implementations: `InMemoryVectorStore` (this tier) and `sqlite-vec`
+ * or a hosted vector DB (Tier 3.6+).
+ */
 export interface VectorStore {
   /**
    * Insert or replace a lore snippet. Requires `snippet.embedding` to
@@ -83,7 +107,9 @@ export interface VectorStore {
     filter?: VectorQueryFilter,
   ): VectorSearchResult[];
 
+  /** Remove a snippet by id; returns true if it existed. */
   delete(id: string): boolean;
 
+  /** Number of stored snippets. */
   size(): number;
 }

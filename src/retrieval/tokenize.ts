@@ -10,6 +10,7 @@
 
 const SPLIT = /[^a-z0-9']+/i;
 
+/** Lowercase + split on non-word boundaries; returns non-empty tokens only. */
 export function tokenize(text: string): string[] {
   const out: string[] = [];
   for (const raw of text.toLowerCase().split(SPLIT)) {

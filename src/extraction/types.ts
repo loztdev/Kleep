@@ -21,6 +21,7 @@
 import type { MemoryKind, Network } from "../schema";
 import type { Turn } from "../conversation";
 
+/** A non-entity claim extracted from a turn: FACT / RULE / OPINION / SUMMARY / REFLECTION / LORE. */
 export interface ExtractedAtomicFact {
   type: "atomic";
   kind: MemoryKind;
@@ -35,6 +36,7 @@ export interface ExtractedAtomicFact {
   tags?: readonly string[];
 }
 
+/** One typed claim about an entity, with its own quote anchor and confidence. */
 export interface ExtractedAttribute {
   key: string;
   value: unknown;
@@ -42,6 +44,7 @@ export interface ExtractedAttribute {
   confidence: number;
 }
 
+/** An entity card extracted from a turn — becomes a WorldBibleEntry. */
 export interface ExtractedEntity {
   type: "entity";
   entity_id: string;
@@ -57,8 +60,10 @@ export interface ExtractedEntity {
   summary?: string;
 }
 
+/** Discriminated union of every shape an extractor may emit. */
 export type ExtractedFact = ExtractedAtomicFact | ExtractedEntity;
 
+/** Pluggable extraction interface — PatternExtractor (stub) or ClaudeExtractor (future). */
 export interface Extractor {
   /**
    * Extract facts from a single turn. May return synchronously (stub

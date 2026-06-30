@@ -100,6 +100,7 @@ export function explainAllAttributes(
  * @returns `true` if the asset is a world bible entry, `false` otherwise.
  */
 
+/** Local type-guard for entity cards. */
 function isWorldBibleEntry(asset: AnyAsset): asset is WorldBibleEntry {
   return (
     asset.kind === MemoryKind.ENTITY &&
@@ -198,11 +199,7 @@ function stringify(v: unknown): string {
   }
 }
 
-/**
- * Exposes selected internal helpers for inspection.
- *
- * @returns An object containing `isWorldBibleEntry` and `headlineFor`.
- */
+/** Test-only access to module-private helpers. Not part of the public API. */
 export function _internals() {
   return { isWorldBibleEntry, headlineFor };
 }
