@@ -4,6 +4,7 @@
 
 export type { Summarizer } from "./types";
 export { StubSummarizer } from "./stubSummarizer";
+export { ClaudeSummarizer, type ClaudeSummarizerOptions } from "./claudeSummarizer";
 export {
   RollingSummarizer,
   type RollingSummarizerOptions,

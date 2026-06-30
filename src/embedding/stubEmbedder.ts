@@ -7,6 +7,7 @@
  * unit tests).
  */
 
+import { FNV_OFFSET_BASIS, fnv1aStep } from "../util/hash";
 import type { Embedder } from "./types";
 
 /** Construction options for `StubEmbedder`. */
@@ -29,10 +30,9 @@ export class StubEmbedder implements Embedder {
   /** Hash-derive a deterministic vector from `text`. Identical input → identical output. */
   embed(text: string): readonly number[] {
     const out = new Array<number>(this.dim).fill(0);
-    let h = 2166136261 >>> 0;
+    let h = FNV_OFFSET_BASIS >>> 0;
     for (let i = 0; i < text.length; i++) {
-      h ^= text.charCodeAt(i);
-      h = Math.imul(h, 16777619) >>> 0;
+      h = fnv1aStep(h, text.charCodeAt(i));
       const slot = h % this.dim;
       // Map hash byte to [-1, 1] for cosine sanity.
       out[slot]! += ((h & 0xff) / 127.5) - 1;

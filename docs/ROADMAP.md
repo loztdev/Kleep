@@ -37,15 +37,15 @@ The "elite" features from the original spec.
 
 ---
 
-## Tier 5 — Real Components 📋
+## Tier 5 — Real Components 🟡
 
 Each is independent, unblocked, and slots in behind an existing interface.
 
-- **5.1 Claude-backed Extractor** — Replace `PatternExtractor` with structured-output Claude call.
-- **5.2 Real Embedder** — On-device ONNX sentence-transformers OR hosted (Cohere/Voyage/OpenAI).
-- **5.3 Claude-backed Summarizer** — Real "state delta" prompt.
-- **5.4 Claude-backed Reflector** — Smarter contradiction/consolidation than the heuristic.
-- **5.5 Claude API client** — Auth, retry with jitter, streaming, error taxonomy, cost tracking. Foundation for 5.1/5.3/5.4.
+- **5.1 Claude-backed Extractor** ✅ — `ClaudeExtractor` (`src/extraction/claudeExtractor.ts`): structured-output call per turn, turn-content-hash caching, per-turn cost-cap callback. Anchor verification and disposition-aware confidence calibration were already at the `AutoRetainEngine` layer, so the extractor itself just has to return well-formed quotes.
+- **5.2 Real Embedder** 📋 — On-device ONNX sentence-transformers OR hosted (Cohere/Voyage/OpenAI). Not started — needs either a model download (on-device) or a paid hosted API key, neither available in a sandboxed dev session.
+- **5.3 Claude-backed Summarizer** ✅ — `ClaudeSummarizer` (`src/summarization/claudeSummarizer.ts`): real state-delta prompt, output validated (word cap + must reference a name from the source turns when one exists), falls back to `StubSummarizer` on API failure or failed validation so rolling never blocks.
+- **5.4 Claude-backed Reflector** 📋 — Smarter contradiction/consolidation than the heuristic. Not started this pass.
+- **5.5 Claude API client** ✅ — `src/claude/`: `ClaudeClient` wraps `@anthropic-ai/sdk` behind a pluggable `ClaudeTransport`. Retry-with-jitter on 429/529/5xx, per-call cost accounting (`CostTracker`, `src/claude/costTracker.ts`), a Zod→tool-schema structured-output helper (`client.structured()`), basic streaming (`client.streamMessage()`), and a fixture record/replay transport (`src/claude/fixtures.ts`) so `npm test` never needs a real key. Auth-from-SecureStore lives in `src/claude/secureKeyStore.ts`, intentionally excluded from the `src/claude` barrel since it touches a native module — wire it up from the Settings screen (Tier 7.3/9) when that's built. Manual smoke test: `npm run claude-smoke` (needs `ANTHROPIC_API_KEY`; not run in CI).
 
 ## Tier 6 — Persistence 📋
 
@@ -70,7 +70,7 @@ The actual product the user sees.
 From the original kickoff message.
 
 - **8.1 Auto rolling summaries** ✅ (Tier 3.7)
-- **8.2 Auto lorebooks** 🟡 — Schema ✅; Claude extractor (5.1) must emit LORE; lorebook viewer (7.5).
+- **8.2 Auto lorebooks** 🟡 — Schema ✅; `ClaudeExtractor` (5.1) ✅ can emit LORE-kind facts (prompted for it, untested against a real model — no API key in dev sandbox); still needs the lorebook viewer (7.5).
 - **8.3 Auto world bibles with semantic formatting** 🟡 — Entity cards ✅; per-`entity_type` schemas (`character.hp`, `location.climate`) via an `EntityTypeRegistry`; pretty serialization for prompts.
 - **8.4 Hierarchical context anchoring** 📋 — Add `Scene` and `Chapter` levels above `Turn`; fusion boosts same-scene results; UI breadcrumb.
 - **8.5 State-tracking tokens** 📋 — Compact `[turn:N] hp -10 → 32` deltas for prompt injection (distinct from rolling summary).
