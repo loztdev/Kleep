@@ -39,16 +39,21 @@ jobs:
       - name: Generate native Android project (expo prebuild)
         run: npx expo prebuild --platform android --non-interactive
 
-      # Debug build: Gradle auto-generates a debug keystore, so the APK
-      # is installable straight away with no signing secrets to manage.
-      # Swap to `assembleRelease` + a configured signing key once this
-      # needs to ship to real users instead of testers.
-      - name: Build debug APK
+      # `release`, not `debug`: a debug build expects a live Metro server
+      # on the dev machine (it doesn't embed the JS bundle) and shows the
+      # red "Unable to load script" screen on any device that isn't
+      # tethered to one. A release build always bundles the JS + assets
+      # into the APK, so it's actually standalone-installable. Expo's
+      # generated build.gradle points the release signingConfig at the
+      # auto-generated debug keystore by default, so this still needs no
+      # signing secrets — swap that to a real keystore once this ships
+      # to real users instead of testers.
+      - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kleep-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: kleep-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error

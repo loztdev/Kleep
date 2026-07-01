@@ -140,13 +140,13 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 **Why:** #5 shipped a working chat screen, but nobody could actually install it on a phone without a local Android/EAS toolchain. A CI-built APK closes that gap with zero paid services or secrets.
 
 **Built:**
-- `.github/workflows/android-apk.yml` — on push to `main`, PRs into `main`, and manual dispatch: `npx expo prebuild --platform android` generates the native project fresh (not committed — `android/`/`ios/` stay gitignored, matching managed-workflow convention), then `./gradlew assembleDebug` builds a debug-signed (auto-generated keystore, no secrets needed) APK, uploaded as a workflow artifact
+- `.github/workflows/android-apk.yml` — on push to `main`, PRs into `main`, and manual dispatch: `npx expo prebuild --platform android` generates the native project fresh (not committed — `android/`/`ios/` stay gitignored, matching managed-workflow convention), then `./gradlew assembleRelease` builds a **release** APK, uploaded as a workflow artifact
 - `app.json`: added `android.package` (`dev.loztdev.kleep`, required for `expo prebuild`) and `expo-system-ui` so `userInterfaceStyle: "dark"` actually takes effect natively, not just via component-level styling
 - GitHub-hosted `ubuntu-latest` runners ship with the Android SDK preinstalled, so the workflow only needs a JDK (`actions/setup-java`) on top of Node — no SDK install step
 
 **Done when:**
 - `expo prebuild --platform android` resolves cleanly against `app.json` ✅ — run locally in this sandbox as a sanity check (the generated `android/` dir was deleted afterward, matching `.gitignore`)
-- A pushed commit produces a downloadable, installable debug APK — **not verified**: GitHub Actions itself can't be executed from this sandbox, so the workflow is untested end-to-end until it runs for real on `origin`
+- A pushed commit produces a downloadable, installable APK ✅ — first real run built and uploaded `kleep-debug-apk` successfully. **Fixed since**: that first artifact was a **debug** build, which showed a red "Unable to load script" screen on install — debug builds expect a live Metro server on the dev machine instead of embedding the JS bundle. Switched to `assembleRelease` (Expo's generated `build.gradle` already points the release signing config at the auto-generated debug keystore, so this still needs no real signing secrets) so the APK is genuinely standalone. Re-verifying on the next CI run.
 
 **Depends on:** #5 (there has to be an app worth installing first).
 
