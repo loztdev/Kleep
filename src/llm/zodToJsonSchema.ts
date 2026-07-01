@@ -97,6 +97,9 @@ function convertByType(schema: z.ZodTypeAny, d: ReturnType<typeof def>): Record<
 }
 
 function isOptional(schema: z.ZodTypeAny): boolean {
-  const typeName = def(schema).typeName as string;
-  return typeName === "ZodOptional" || typeName === "ZodDefault";
+  const d = def(schema);
+  const typeName = d.typeName as string;
+  if (typeName === "ZodOptional" || typeName === "ZodDefault") return true;
+  if (typeName === "ZodEffects") return isOptional(d.schema);
+  return false;
 }

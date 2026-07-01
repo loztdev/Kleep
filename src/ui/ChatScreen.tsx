@@ -42,10 +42,14 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  // `sending` (state) lags a render behind a tap, so a fast double-tap can
+  // slip through before the button disables — this ref guard is synchronous.
+  const sendingRef = useRef(false);
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sendingRef.current) return;
+    sendingRef.current = true;
 
     const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
     engine.buffer.append(userTurn);
@@ -55,7 +59,7 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
     setSending(true);
 
     try {
-      const replyText = await generateReply(provider, engine.buffer.all());
+      const replyText = await generateReply(provider, engine.buffer.liveTurns());
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -81,6 +85,7 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
       console.error("generateReply failed:", err);
       setError(friendlyErrorMessage(err));
     } finally {
+      sendingRef.current = false;
       setSending(false);
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     }

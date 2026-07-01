@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   const final = await handle.final;
   console.log("\n(final):", final.usage);
 
-  console.log("\nTotal cost so far: $%s", client.costTracker.totalUsd().toFixed(6));
+  console.log("\nTotal cost so far: $%s", client.totalCostUsd().toFixed(6));
 }
 
 main().catch((err) => {

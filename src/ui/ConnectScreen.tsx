@@ -57,6 +57,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
           <Pressable
             key={p.kind}
             onPress={() => setKind(p.kind)}
+            disabled={connecting}
             style={[styles.providerButton, kind === p.kind && styles.providerButtonActive]}
           >
             <Text style={[styles.providerButtonText, kind === p.kind && styles.providerButtonTextActive]}>
@@ -74,6 +75,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
         autoCapitalize="none"
         autoCorrect={false}
         secureTextEntry
+        editable={!connecting}
       />
       <TextInput
         style={styles.input}
@@ -82,6 +84,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
         onChangeText={setModel}
         autoCapitalize="none"
         autoCorrect={false}
+        editable={!connecting}
       />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}

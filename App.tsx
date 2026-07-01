@@ -17,13 +17,18 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const kind = await loadActiveProvider();
-      const apiKey = kind ? await loadApiKey(kind) : null;
-      if (cancelled) return;
-      if (kind && apiKey) {
-        setState({ status: "connected", provider: buildLlmProvider({ kind, apiKey }) });
-      } else {
-        setState({ status: "disconnected" });
+      try {
+        const kind = await loadActiveProvider();
+        const apiKey = kind ? await loadApiKey(kind) : null;
+        if (cancelled) return;
+        if (kind && apiKey) {
+          setState({ status: "connected", provider: buildLlmProvider({ kind, apiKey }) });
+        } else {
+          setState({ status: "disconnected" });
+        }
+      } catch (err) {
+        console.error("Failed to load stored provider:", err);
+        if (!cancelled) setState({ status: "disconnected" });
       }
     })();
     return () => {
@@ -35,7 +40,9 @@ export default function App() {
     setState((prev) => {
       if (prev.status === "connected") {
         // Fire-and-forget: the UI shouldn't wait on SecureStore to clear.
-        loadActiveProvider().then((kind) => kind && clearApiKey(kind));
+        loadActiveProvider()
+          .then((kind) => kind && clearApiKey(kind))
+          .catch((err) => console.warn("Failed to clear stored API key:", err));
       }
       return { status: "disconnected" };
     });
