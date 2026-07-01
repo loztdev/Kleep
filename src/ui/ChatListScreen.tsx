@@ -19,6 +19,7 @@ interface ChatListScreenProps {
   onRenameChat: (sessionId: string, title: string) => void;
   onDeleteChat: (sessionId: string) => void;
   onDisconnect: () => void;
+  onOpenMemory: () => void;
 }
 
 export function ChatListScreen({
@@ -28,6 +29,7 @@ export function ChatListScreen({
   onRenameChat,
   onDeleteChat,
   onDisconnect,
+  onOpenMemory,
 }: ChatListScreenProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
@@ -48,9 +50,19 @@ export function ChatListScreen({
     <View style={styles.flex}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
-        <Pressable onPress={onDisconnect}>
-          <Text style={styles.disconnect}>Disconnect</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={onOpenMemory}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Open memory browser"
+          >
+            <Ionicons name="library-outline" size={20} color={MUTED} />
+          </Pressable>
+          <Pressable onPress={onDisconnect}>
+            <Text style={styles.disconnect}>Disconnect</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Pressable style={styles.newChatButton} onPress={onNewChat}>
@@ -188,6 +200,7 @@ const styles = StyleSheet.create({
     borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 20, fontWeight: "700", color: TEXT },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 16 },
   disconnect: { color: MUTED, fontSize: 13 },
   newChatButton: {
     flexDirection: "row",

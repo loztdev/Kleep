@@ -16,6 +16,7 @@ import { openKleepDatabase } from "./src/storage/sql/openKleepDatabase";
 import { ChatListScreen } from "./src/ui/ChatListScreen";
 import { ChatScreen } from "./src/ui/ChatScreen";
 import { ConnectScreen } from "./src/ui/ConnectScreen";
+import { MemoryBrowserScreen } from "./src/ui/MemoryBrowserScreen";
 import { BG, MUTED } from "./src/ui/theme";
 
 /**
@@ -38,7 +39,8 @@ type AppState =
   | { status: "loading" }
   | { status: "disconnected" }
   | { status: "chatList"; ctx: ConnectedContext }
-  | { status: "chat"; ctx: ConnectedContext; sessionId: string | null };
+  | { status: "chat"; ctx: ConnectedContext; sessionId: string | null }
+  | { status: "memory"; ctx: ConnectedContext; returnTo: AppState };
 
 function buildConnectedContext(
   provider: LlmProvider,
@@ -126,7 +128,21 @@ export default function App() {
         ctx={state.ctx}
         onOpenChat={(sessionId) => setState({ status: "chat", ctx: state.ctx, sessionId })}
         onDisconnect={handleDisconnect}
+        onOpenMemory={() => setState({ status: "memory", ctx: state.ctx, returnTo: state })}
       />
+    );
+  }
+
+  if (state.status === "memory") {
+    return (
+      <View style={styles.flex}>
+        <MemoryBrowserScreen
+          structured={state.ctx.structured}
+          vector={state.ctx.vector}
+          onClose={() => setState(state.returnTo)}
+        />
+        <StatusBar style="light" />
+      </View>
     );
   }
 
@@ -141,6 +157,7 @@ export default function App() {
         sessionId={state.sessionId}
         sessionStore={state.ctx.sessionStore}
         onDisconnect={handleDisconnect}
+        onOpenMemory={() => setState({ status: "memory", ctx: state.ctx, returnTo: state })}
         {...(state.ctx.sessionStore
           ? { onBack: () => setState({ status: "chatList", ctx: state.ctx }) }
           : {})}
@@ -155,10 +172,12 @@ function ChatListBody({
   ctx,
   onOpenChat,
   onDisconnect,
+  onOpenMemory,
 }: {
   ctx: ConnectedContext;
   onOpenChat: (sessionId: string) => void;
   onDisconnect: () => void;
+  onOpenMemory: () => void;
 }) {
   const sessionStore = ctx.sessionStore;
   const [refreshTick, forceRefresh] = useState(0);
@@ -198,6 +217,7 @@ function ChatListBody({
         onRenameChat={handleRename}
         onDeleteChat={handleDelete}
         onDisconnect={onDisconnect}
+        onOpenMemory={onOpenMemory}
       />
       <StatusBar style="light" />
     </View>

@@ -1,5 +1,6 @@
 /**
- * Opens (or creates) the on-device SQLite database and runs migrations.
+ * Opens (or creates) the on-device SQLite database and runs migrations
+ * (iOS/Android only — see `openKleepDatabase.web.ts` for the web stub).
  *
  * `expo-sqlite` wraps a native module that doesn't exist outside an
  * Expo/React Native runtime, so — like `secureKeyStore.ts` — this file is
@@ -7,24 +8,24 @@
  * under plain Node (Jest) would throw at module-load time. Import it
  * directly from app code only.
  *
- * Returns `null` on web: `expo-sqlite`'s web backend exists but its sync
- * API (what every store here is written against, to avoid an async
- * rewrite of the whole memory pipeline) isn't a good fit for a
- * WASM/OPFS-backed browser database. Same policy as `secureKeyStore.ts` —
- * web is the debug/testing target, not the real distribution target, so
- * it falls back to a fresh in-memory pipeline instead (see `App.tsx`).
+ * This file's `.native.ts` suffix (not just a `Platform.OS` check) matters:
+ * Metro resolves imports statically per bundle target, so a plain
+ * `openKleepDatabase.ts` that `import`s `expo-sqlite` unconditionally
+ * fails the *web* bundle outright (it can't resolve expo-sqlite's web
+ * worker's wasm asset) even though the runtime code path returning `null`
+ * on web is never reached — the import itself has to resolve first.
+ * Splitting into `.native.ts`/`.web.ts` keeps `expo-sqlite` out of the web
+ * bundle entirely.
  */
 
-import { Platform } from "react-native";
 import * as SQLite from "expo-sqlite";
 import { runMigrations } from "./schema";
 import type { SqlDatabase } from "./types";
 
 const DATABASE_NAME = "kleep.db";
 
-/** Open the shared on-device database, running any pending migrations first. `null` on web. */
+/** Open the shared on-device database, running any pending migrations first. */
 export function openKleepDatabase(): SqlDatabase | null {
-  if (Platform.OS === "web") return null;
   const db = SQLite.openDatabaseSync(DATABASE_NAME);
   const asSqlDatabase = db as unknown as SqlDatabase;
   asSqlDatabase.execSync("PRAGMA foreign_keys = ON;");

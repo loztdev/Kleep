@@ -58,6 +58,7 @@ interface ChatScreenProps {
   sessionId: string | null;
   sessionStore: ChatSessionStore | null;
   onDisconnect: () => void;
+  onOpenMemory: () => void;
   /** Present only when there's a chat list to go back to (native). */
   onBack?: () => void;
 }
@@ -71,6 +72,7 @@ export function ChatScreen({
   sessionId,
   sessionStore,
   onDisconnect,
+  onOpenMemory,
   onBack,
 }: ChatScreenProps) {
   const { engine, providerMismatch } = useMemo(() => {
@@ -288,9 +290,19 @@ export function ChatScreen({
           ) : null}
           <Text style={styles.headerTitle}>Kleep</Text>
         </View>
-        <Pressable onPress={onDisconnect}>
-          <Text style={styles.disconnect}>Disconnect</Text>
-        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable
+            onPress={onOpenMemory}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Open memory browser"
+          >
+            <Ionicons name="library-outline" size={20} color={MUTED} />
+          </Pressable>
+          <Pressable onPress={onDisconnect}>
+            <Text style={styles.disconnect}>Disconnect</Text>
+          </Pressable>
+        </View>
       </View>
 
       {providerMismatch ? (
@@ -475,6 +487,7 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 16 },
   headerTitle: { fontSize: 20, fontWeight: "700", color: TEXT },
   providerNotice: {
     color: MUTED,

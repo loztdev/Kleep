@@ -281,6 +281,26 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
+## 15. Memory browser: World Bible + Lore cards ⚡ (not in the original top-10, added by request)
+
+**Why:** "Do we have biomimetic memory, or nah?" — yes, but there was no way to actually look at what it had learned. A cards-first browser (per request: "start with cards, add graph after") for the two stores every chat session shares.
+
+**Built:**
+- `VectorStore.list(filter?)` (`src/storage/types.ts`) — new interface method, implemented on both `InMemoryVectorStore` and `SqliteVectorStore`: every stored `LoreSnippet` matching an optional network/tag/viewpoint_holder filter, unordered, no embedding required. `query()` (top-K semantic search) was never meant to serve "just list everything" — this was a real gap, not a workaround.
+- `src/ui/MemoryBrowserScreen.tsx` (new) — two tabs. "World Bible" lists every `WorldBibleEntry` (`structured.query({kind: MemoryKind.ENTITY})`) as a card; tapping one opens a detail modal with every attribute plus a per-attribute "Why do I know this?" button (`explainAttribute()` → `WhyPanel`) and an entity-level one (`explain()`). "Lore" lists every snippet via the new `list()`, same why-button pattern.
+- `App.tsx` gained a `"memory"` app state (`{ ctx, returnTo }`, so closing it goes back to whichever screen opened it) reachable from a header icon on both `ChatListScreen` (native) and `ChatScreen` (web's single-ephemeral-chat case, so the feature isn't native-only).
+- `WhyPanel`/`explain()`/`explainAttribute()` (Tier 4.8) turned out to be fully reusable as-is — no adaptation needed, confirming the "purely presentational, no data-fetching" design goal from when they were built.
+
+**Also fixed while verifying this (pre-existing, not caused by this change):** the web bundle was completely broken — `openKleepDatabase.ts` imported `expo-sqlite` unconditionally (with only a runtime `Platform.OS === "web"` check to skip using it), but Metro resolves imports statically per bundle target, so the web build failed outright trying to resolve `expo-sqlite`'s wasm asset. Split into `openKleepDatabase.native.ts`/`.web.ts` (Metro's standard platform-suffix convention) so the web variant never imports `expo-sqlite` at all; added `moduleSuffixes` to `tsconfig.json` so `tsc` resolves the extensionless import too. Verified: `expo start --web` now bundles cleanly (549 modules, previously failed with an unresolved-import error) and serves the app; confirmed via a raw HTTP fetch of the bundle rather than a browser session, since this sandbox's Chromium/Electron setup can't run the RN DevTools Metro tries to install (unrelated, pre-existing sandbox limitation, not a code issue).
+
+**Done when:**
+- `list()` behaves identically on both store impls (network/tag/viewpoint_holder filters, empty store, no filter) ✅ — shared contract tests in `src/storage/__tests__/vectorStore.contract.ts`
+- The screen renders and the why-panel flow works — **not verified in a live RN session** (no simulator/device in this sandbox); verified instead that `tsc`/the full Jest suite pass and that the web bundle actually builds and serves after the fix above, which is the same verification depth Tier 7.1's chat-list work got.
+
+**Depends on:** #4/#6 (structured/vector stores), #13 (chat sessions, for the `App.tsx` state-machine pattern this reused).
+
+---
+
 ## Suggested execution order
 
 The dependency graph collapses into roughly three waves:
@@ -289,7 +309,7 @@ The dependency graph collapses into roughly three waves:
 **Wave 2 (depends on Wave 1):** #3, #5, #6
 **Wave 3 (depends on Waves 1–2):** #7, #8, #9, #10
 
-Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave. Item #12 (Android APK via GitHub Actions) landed the same way, right after #5 — it makes the chat surface installable rather than adding new product surface. Items #4 and #6 (persistence) and #13 (chat sessions + list UI) landed together, by request, ahead of Wave 3 — persistence turned out to be the actual foundation the "usable" milestone was missing, not a later-wave nice-to-have.
+Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave. Item #12 (Android APK via GitHub Actions) landed the same way, right after #5 — it makes the chat surface installable rather than adding new product surface. Items #4 and #6 (persistence), #13 (chat sessions + list UI), #14 (model browser), and #15 (memory browser) landed together, by request, ahead of Wave 3 — persistence turned out to be the actual foundation the "usable" milestone was missing, not a later-wave nice-to-have, and the other two were natural follow-ons once it existed.
 
 If we goal-mode the whole list, that's ~3–4 weeks of focused work at the pace we've been moving. After Wave 2, Kleep is actually usable — and as of #5's first pass + #11, it now technically is (single-screen, non-streaming, no persistence, needs your own API key). After Wave 3, it's a product.
 
