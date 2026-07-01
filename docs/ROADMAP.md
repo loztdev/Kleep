@@ -41,11 +41,12 @@ The "elite" features from the original spec.
 
 Each is independent, unblocked, and slots in behind an existing interface.
 
-- **5.1 Claude-backed Extractor** ✅ — `ClaudeExtractor` (`src/extraction/claudeExtractor.ts`): structured-output call per turn, turn-content-hash caching, per-turn cost-cap callback. Anchor verification and disposition-aware confidence calibration were already at the `AutoRetainEngine` layer, so the extractor itself just has to return well-formed quotes.
+- **5.1 LLM-backed Extractor** ✅ — `LlmExtractor` (`src/extraction/llmExtractor.ts`, renamed from `ClaudeExtractor` once it went provider-agnostic): structured-output call per turn, turn-content-hash caching, per-turn cost-cap callback. Anchor verification and disposition-aware confidence calibration were already at the `AutoRetainEngine` layer, so the extractor itself just has to return well-formed quotes. Runs on any `LlmProvider` (Claude or OpenRouter).
 - **5.2 Real Embedder** 📋 — On-device ONNX sentence-transformers OR hosted (Cohere/Voyage/OpenAI). Not started — needs either a model download (on-device) or a paid hosted API key, neither available in a sandboxed dev session.
-- **5.3 Claude-backed Summarizer** ✅ — `ClaudeSummarizer` (`src/summarization/claudeSummarizer.ts`): real state-delta prompt, output validated (word cap + must reference a name from the source turns when one exists), falls back to `StubSummarizer` on API failure or failed validation so rolling never blocks.
+- **5.3 LLM-backed Summarizer** ✅ — `LlmSummarizer` (`src/summarization/llmSummarizer.ts`, renamed from `ClaudeSummarizer`): real state-delta prompt, output validated (word cap + must reference a name from the source turns when one exists), falls back to `StubSummarizer` on API failure or failed validation so rolling never blocks. Runs on any `LlmProvider`.
 - **5.4 Claude-backed Reflector** 📋 — Smarter contradiction/consolidation than the heuristic. Not started this pass.
-- **5.5 Claude API client** ✅ — `src/claude/`: `ClaudeClient` wraps `@anthropic-ai/sdk` behind a pluggable `ClaudeTransport`. Retry-with-jitter on 429/529/5xx, per-call cost accounting (`CostTracker`, `src/claude/costTracker.ts`), a Zod→tool-schema structured-output helper (`client.structured()`), basic streaming (`client.streamMessage()`), and a fixture record/replay transport (`src/claude/fixtures.ts`) so `npm test` never needs a real key. Auth-from-SecureStore lives in `src/claude/secureKeyStore.ts`, intentionally excluded from the `src/claude` barrel since it touches a native module — wire it up from the Settings screen (Tier 7.3/9) when that's built. Manual smoke test: `npm run claude-smoke` (needs `ANTHROPIC_API_KEY`; not run in CI).
+- **5.5 Claude API client** ✅ — `src/claude/`: `ClaudeClient` wraps `@anthropic-ai/sdk` behind a pluggable `ClaudeTransport`. Retry-with-jitter on 429/529/5xx, per-call cost accounting (`CostTracker`, `src/claude/costTracker.ts`), a Zod→tool-schema structured-output helper (`client.structured()`), basic streaming (`client.streamMessage()`), and a fixture record/replay transport (`src/claude/fixtures.ts`) so `npm test` never needs a real key. Manual smoke test: `npm run claude-smoke` (needs `ANTHROPIC_API_KEY`; not run in CI).
+- **5.6 OpenRouter client + generic provider interface** ✅ (new, by request) — `src/llm/`: `LlmProvider` interface (`sendMessage`/`structured`/`streamMessage`/`totalCostUsd`) implemented by `ClaudeProvider` (adapts `ClaudeClient`) and `OpenRouterClient` (new, fetch-based OpenAI-compatible client — retry+jitter, cost from OpenRouter's native `usage.cost`, Zod-backed function-calling, SSE streaming, fixture record/replay). `buildLlmProvider()` + `secureKeyStore.ts` handle connect-time provider selection. Manual smoke test: `scripts/openrouter-smoke.ts` (needs `OPENROUTER_API_KEY`) — **not run**, this dev sandbox's egress policy blocks `openrouter.ai` outright even with a real key provided; verified instead against a mocked `fetch` (`src/llm/openrouter/__tests__/realTransport.test.ts`).
 
 ## Tier 6 — Persistence 📋
 
@@ -54,13 +55,13 @@ Each is independent, unblocked, and slots in behind an existing interface.
 - **6.3 Persistent retrieval indexes** — BM25 + entity in SQLite (or rebuild-on-load).
 - **6.4 Pending-mentions persistence** — Skepticism-gate queue survives restart.
 
-## Tier 7 — Mobile App Surface 📋
+## Tier 7 — Mobile App Surface 🟡
 
 The actual product the user sees.
 
-- **7.1 Chat surface** — Turn list, composer, streaming responses, jump-to-turn affordance.
+- **7.1 Chat surface** 🟡 — First pass shipped: `src/ui/ChatScreen.tsx` (turn list, composer, non-streaming send/receive, best-effort `AutoRetainEngine`/`RollingSummarizer` ticks after each reply) and `src/ui/ConnectScreen.tsx` (provider + API key entry, wired to `secureKeyStore.ts`/`buildLlmProvider()`). Verified live in a browser (Playwright) against the connect flow and error paths; the live-model round trip itself couldn't be exercised in this sandbox (egress to both providers is blocked), so it's covered by the `memoryEngine`/`chatReply` Jest tests instead. Still missing: streaming responses, jump-to-turn affordance, and no persistence yet (Tier 6) so conversations reset on reload.
 - **7.2 Why UI integration** — Long-press / "?" affordance on AI output → `WhyPanel`.
-- **7.3 Settings** — Disposition sliders, model picker, API key entry, cost dashboard.
+- **7.3 Settings** 🟡 — API key entry + provider picker ✅ (`ConnectScreen.tsx`, a first pass at connect-time only, not a full settings screen). Disposition sliders, model picker, and cost dashboard still 📋.
 - **7.4 World Bible browser** — Per-entity view with per-attribute provenance + edit affordance.
 - **7.5 Lore book viewer** — Browse vector store; tag editor.
 - **7.6 Reflection inbox** — Surface new `REFLECTION` assets; accept/dismiss with effect application.

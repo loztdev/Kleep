@@ -6,7 +6,7 @@ export type {
   Extractor,
 } from "./types";
 export { PatternExtractor, type PatternExtractorOptions } from "./patternExtractor";
-export { ClaudeExtractor, type ClaudeExtractorOptions } from "./claudeExtractor";
+export { LlmExtractor, type LlmExtractorOptions } from "./llmExtractor";
 export {
   AutoRetainEngine,
   ExtractionAnchorError,

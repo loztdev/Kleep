@@ -96,6 +96,21 @@ describe("zodToToolInputSchema", () => {
     expect(schema.safeParse({ network: "opinion", viewpoint_holder: "Alice" }).success).toBe(true);
   });
 
+  it("does not mark a field-level .optional().refine() as required", () => {
+    const schema = z.object({
+      name: z.string(),
+      nickname: z
+        .string()
+        .optional()
+        .refine((v) => v === undefined || v.length > 0, "must not be blank"),
+    });
+
+    const result = zodToToolInputSchema(schema);
+
+    expect(result.required).toEqual(["name"]);
+    expect(result.properties.nickname).toEqual({ type: "string" });
+  });
+
   it("converts a string-valued native enum with a type field", () => {
     enum Color {
       Red = "red",

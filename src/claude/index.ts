@@ -1,10 +1,11 @@
 /**
  * Tier 5.5 — Claude API client public surface.
  *
- * Deliberately excludes `fixtures.ts` (Node `fs`-only, test/tooling) and
- * `secureKeyStore.ts` (native `expo-secure-store` module) — both would
- * break under Jest or Metro if pulled into this barrel. Import them
- * directly by path where needed.
+ * Deliberately excludes `fixtures.ts` (Node `fs`-only, test/tooling) — it
+ * would break under Jest if pulled into this barrel. Import it directly
+ * by path where needed. Secure API key storage lives at
+ * `src/llm/secureKeyStore.ts` (provider-agnostic, native `expo-secure-store`
+ * module — same reasoning, different file).
  */
 
 export {

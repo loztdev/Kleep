@@ -91,24 +91,43 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
-## 5. Mobile chat surface 🔥
+## 5. Mobile chat surface 🔥 🟡 first pass shipped
 
 **Why:** No app exists yet. `App.tsx` is the default Expo blank screen. Until this is built, nobody can actually use Kleep.
 
-**Build:**
-- Replace `App.tsx` with a navigation root (React Navigation, `Stack`)
-- Chat screen: turn list (FlashList), composer, role badges, streaming response renderer
-- Wire to the `ConversationBuffer`; each user/AI message becomes a `Turn`
-- AutoRetainEngine ticks after each new turn
-- Long-press a message → quick action menu (placeholder for Why UI in #7)
+**Built (first pass — no navigation stack yet, single screen):**
+- `App.tsx` now gates on a connect flow instead of the Expo placeholder: `src/ui/ConnectScreen.tsx` (pick Claude or OpenRouter, paste an API key, optional model override) → `src/ui/ChatScreen.tsx`
+- Chat screen: message list (plain `ScrollView` — not `FlashList` yet), composer, send button, empty state
+- Wire to `ConversationBuffer` via `src/ui/memoryEngine.ts`; each user/AI message becomes a `Turn`
+- `AutoRetainEngine` and `RollingSummarizer` both tick after every assistant reply (best-effort — a flaky extraction call surfaces as a `console.warn`, not a crashed chat)
 - Empty state explaining what the app does
+- Deliberately **non-streaming** (`sendMessage`, not `streamMessage`) — React Native's `fetch` doesn't reliably support streaming response bodies across platforms (especially Android) without extra polyfills; shipping a reliable v1 beat a flaky streaming one. Both `OpenRouterClient` and `ClaudeProvider` already support `streamMessage` for whenever that's worth revisiting.
+- No React Navigation stack, no long-press quick-action menu (Why UI placeholder), no persistence (Tier 6) — conversation and everything the memory pipeline learned reset on reload
 
 **Done when:**
-- `npm run web` renders a working chat against a mocked Claude responder
-- `npm run ios` + `npm run android` boot without crashing
-- A 10-turn conversation triggers the full pipeline and the World Bible reflects what was said
+- `npm run web` renders a working chat ✅ — verified by hand: connect flow → send a message → (in this dev sandbox, the network call to the configured provider is blocked by egress policy, so this specifically exercised and confirmed the *error-handling* path — a clean inline banner, no crash) → see `src/ui/__tests__/memoryEngine.test.ts` for the automated equivalent (scripted transport, no real network) proving a real reply **does** flow through `AutoRetainEngine`/`RollingSummarizer` correctly
+- `npm run ios` + `npm run android` boot without crashing — **not verified**, no simulators available in this sandbox
+- A 10-turn conversation triggers the full pipeline and the World Bible reflects what was said — verified at small scale via the automated test above; not run manually for 10 real turns (no live provider access from this sandbox)
 
-**Depends on:** #1 for real responses (or wire a mock for now).
+**Depends on:** #1 for real responses — now also runs on OpenRouter (see below), not just Claude.
+
+---
+
+## 11. OpenRouter support + generic provider interface ⚡ (not in the original top-10, added by request)
+
+**Why:** Decouples Kleep's LLM-backed components from Anthropic specifically — run extraction, summarization, and chat on OpenRouter (any of its hundreds of models) or Claude, picked at connect time.
+
+**Built:**
+- `src/llm/` — provider-agnostic `LlmProvider` interface (`sendMessage`, `structured`, `streamMessage`, `totalCostUsd`) that `ClaudeProvider` (adapts the existing `ClaudeClient`) and `OpenRouterClient` (new — fetch-based, OpenAI-compatible Chat Completions, retry+jitter, cost from OpenRouter's native `usage.cost` field, Zod-backed structured output via OpenAI function-calling, SSE streaming) both implement
+- `LlmExtractor`/`LlmSummarizer` (renamed from `ClaudeExtractor`/`ClaudeSummarizer`) now take any `LlmProvider`
+- `src/llm/buildProvider.ts` + `src/llm/secureKeyStore.ts` — connect-time provider selection persisted to SecureStore (no-op on web; see module doc)
+- `scripts/openrouter-smoke.ts` — manual smoke test, mirroring `claude-smoke.ts`
+
+**Done when:**
+- `npm test` passes with mocked-`fetch`/fixture-replay coverage ✅ (`src/llm/openrouter/__tests__/*`, `src/llm/__tests__/*`)
+- Manual smoke test against the real OpenRouter API — **not run**: this sandbox's egress proxy hard-denies `openrouter.ai` outright (confirmed via the proxy's own status endpoint as a policy denial, not a transient failure) even with a real key provided. Run `scripts/openrouter-smoke.ts` somewhere with network access to verify the live wire format.
+
+**Depends on:** nothing new — reuses #1's Zod→tool-schema converter (now provider-agnostic at `src/llm/zodToJsonSchema.ts`) and hash utility.
 
 ---
 
@@ -210,6 +229,8 @@ The dependency graph collapses into roughly three waves:
 **Wave 2 (depends on Wave 1):** #3, #5, #6
 **Wave 3 (depends on Waves 1–2):** #7, #8, #9, #10
 
-If we goal-mode the whole list, that's ~3–4 weeks of focused work at the pace we've been moving. After Wave 2, Kleep is actually usable. After Wave 3, it's a product.
+Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave.
+
+If we goal-mode the whole list, that's ~3–4 weeks of focused work at the pace we've been moving. After Wave 2, Kleep is actually usable — and as of #5's first pass + #11, it now technically is (single-screen, non-streaming, no persistence, needs your own API key). After Wave 3, it's a product.
 
 See [`ROADMAP.md`](./ROADMAP.md) for the full long-term picture.

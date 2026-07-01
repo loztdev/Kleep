@@ -8,7 +8,7 @@
  *
  * Auth is intentionally out of scope here — `ClaudeClient` just takes an
  * `apiKey` string or a pre-built `ClaudeTransport`. Loading the key from
- * Expo SecureStore is `secureKeyStore.ts`'s job, kept separate so this
+ * Expo SecureStore is `src/llm/secureKeyStore.ts`'s job, kept separate so this
  * module (and its tests) never touch a native module.
  */
 

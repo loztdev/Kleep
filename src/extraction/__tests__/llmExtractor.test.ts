@@ -1,12 +1,13 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { ClaudeClient, StructuredOutputError } from "../../claude";
 import type { ClaudeMessageStream, ClaudeRequest, ClaudeTransport } from "../../claude";
+import { ClaudeProvider, type LlmProvider } from "../../llm";
 import { ConversationBuffer, TurnRole, type Turn } from "../../conversation";
 import { InMemoryStructuredStore, InMemoryVectorStore } from "../../storage";
 import { MemoryRouter } from "../../router";
 import { RouterSink } from "../../ingest";
 import { AutoRetainEngine, ExtractionAnchorError } from "../autoRetainEngine";
-import { ClaudeExtractor } from "../claudeExtractor";
+import { LlmExtractor } from "../llmExtractor";
 
 function turn(content: string, id = "t1", index = 0): Turn {
   return { id, role: TurnRole.USER, content, index };
@@ -52,18 +53,23 @@ function toolMessage(input: unknown): Anthropic.Message {
   } as Anthropic.Message;
 }
 
-function harness(client: ClaudeClient) {
+/** Wrap a scripted transport in a real ClaudeClient behind the generic ClaudeProvider adapter. */
+function providerFor(transport: ClaudeTransport): LlmProvider {
+  return new ClaudeProvider(new ClaudeClient({ transport }));
+}
+
+function harness(client: LlmProvider) {
   const buffer = new ConversationBuffer();
   const structured = new InMemoryStructuredStore();
   const vector = new InMemoryVectorStore();
   const router = new MemoryRouter(structured, vector);
   const sink = new RouterSink(router);
-  const extractor = new ClaudeExtractor({ client });
+  const extractor = new LlmExtractor({ client });
   const engine = new AutoRetainEngine(buffer, extractor, sink);
   return { buffer, structured, vector, router, engine, extractor };
 }
 
-describe("ClaudeExtractor", () => {
+describe("LlmExtractor", () => {
   it("extracts an atomic fact and an entity, both correctly anchored via AutoRetainEngine", async () => {
     const content = "Mojo is a puppy. Mojo is at the Park.";
     const transport = new ScriptedTransport(() =>
@@ -91,8 +97,7 @@ describe("ClaudeExtractor", () => {
         ],
       }),
     );
-    const client = new ClaudeClient({ transport });
-    const h = harness(client);
+    const h = harness(providerFor(transport));
     h.buffer.append(turn(content));
 
     const result = await h.engine.tick();
@@ -120,17 +125,15 @@ describe("ClaudeExtractor", () => {
         ],
       }),
     );
-    const client = new ClaudeClient({ transport });
-    const h = harness(client);
+    const h = harness(providerFor(transport));
     h.buffer.append(turn("Mojo is a puppy."));
 
     await expect(h.engine.tick()).rejects.toThrow(ExtractionAnchorError);
   });
 
-  it("caches by turn-content hash — identical content is only sent to Claude once", async () => {
+  it("caches by turn-content hash — identical content is only sent once", async () => {
     const transport = new ScriptedTransport(() => toolMessage({ facts: [] }));
-    const client = new ClaudeClient({ transport });
-    const extractor = new ClaudeExtractor({ client });
+    const extractor = new LlmExtractor({ client: providerFor(transport) });
 
     const t1 = turn("Repeated line.", "t1", 0);
     const t2 = turn("Repeated line.", "t2", 1);
@@ -143,9 +146,8 @@ describe("ClaudeExtractor", () => {
 
   it("invokes onCostCapExceeded when a turn's extraction cost is over the configured cap", async () => {
     const transport = new ScriptedTransport(() => toolMessage({ facts: [] }));
-    const client = new ClaudeClient({ transport });
     const onCostCapExceeded = jest.fn();
-    const extractor = new ClaudeExtractor({ client, maxCostPerTurnUsd: 0, onCostCapExceeded });
+    const extractor = new LlmExtractor({ client: providerFor(transport), maxCostPerTurnUsd: 0, onCostCapExceeded });
 
     await extractor.extract(turn("anything"));
 
@@ -160,8 +162,7 @@ describe("ClaudeExtractor", () => {
       expect(userMessage.content).toContain("a very specific phrase");
       return toolMessage({ facts: [] });
     });
-    const client = new ClaudeClient({ transport });
-    const extractor = new ClaudeExtractor({ client });
+    const extractor = new LlmExtractor({ client: providerFor(transport) });
 
     await extractor.extract(turn("This turn has a very specific phrase in it."));
 
@@ -170,7 +171,7 @@ describe("ClaudeExtractor", () => {
 
   it("rejects an entity whose network isn't world/observation before it ever reaches AutoRetainEngine", async () => {
     // WorldBibleEntrySchema (src/schema/worldBible.ts) only accepts WORLD/OBSERVATION
-    // for entities — this must fail ClaudeExtractor's own validation (a
+    // for entities — this must fail LlmExtractor's own validation (a
     // catchable StructuredOutputError), not blow up two layers downstream.
     const transport = new ScriptedTransport(() =>
       toolMessage({
@@ -188,8 +189,7 @@ describe("ClaudeExtractor", () => {
         ],
       }),
     );
-    const client = new ClaudeClient({ transport });
-    const extractor = new ClaudeExtractor({ client });
+    const extractor = new LlmExtractor({ client: providerFor(transport) });
 
     await expect(extractor.extract(turn("Mojo is a puppy."))).rejects.toThrow(StructuredOutputError);
   });
@@ -209,8 +209,7 @@ describe("ClaudeExtractor", () => {
         ],
       }),
     );
-    const client = new ClaudeClient({ transport });
-    const extractor = new ClaudeExtractor({ client });
+    const extractor = new LlmExtractor({ client: providerFor(transport) });
 
     await expect(extractor.extract(turn("Mojo is a puppy."))).rejects.toThrow(StructuredOutputError);
   });
@@ -231,10 +230,9 @@ describe("ClaudeExtractor", () => {
         ],
       }),
     );
-    const client1 = new ClaudeClient({ transport: misplacedHolder });
-    await expect(new ClaudeExtractor({ client: client1 }).extract(turn("Mojo is a puppy."))).rejects.toThrow(
-      StructuredOutputError,
-    );
+    await expect(
+      new LlmExtractor({ client: providerFor(misplacedHolder) }).extract(turn("Mojo is a puppy.")),
+    ).rejects.toThrow(StructuredOutputError);
 
     const missingHolder = new ScriptedTransport(() =>
       toolMessage({
@@ -250,16 +248,14 @@ describe("ClaudeExtractor", () => {
         ],
       }),
     );
-    const client2 = new ClaudeClient({ transport: missingHolder });
-    await expect(new ClaudeExtractor({ client: client2 }).extract(turn("Alice thinks Mojo is clever."))).rejects.toThrow(
-      StructuredOutputError,
-    );
+    await expect(
+      new LlmExtractor({ client: providerFor(missingHolder) }).extract(turn("Alice thinks Mojo is clever.")),
+    ).rejects.toThrow(StructuredOutputError);
   });
 
   it("cacheSize: 0 disables caching — every call re-extracts", async () => {
     const transport = new ScriptedTransport(() => toolMessage({ facts: [] }));
-    const client = new ClaudeClient({ transport });
-    const extractor = new ClaudeExtractor({ client, cacheSize: 0 });
+    const extractor = new LlmExtractor({ client: providerFor(transport), cacheSize: 0 });
 
     await extractor.extract(turn("Same content.", "t1", 0));
     await extractor.extract(turn("Same content.", "t2", 1));

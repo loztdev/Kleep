@@ -63,7 +63,7 @@ export interface ExtractedEntity {
 /** Discriminated union of every shape an extractor may emit. */
 export type ExtractedFact = ExtractedAtomicFact | ExtractedEntity;
 
-/** Pluggable extraction interface — PatternExtractor (stub) or ClaudeExtractor (future). */
+/** Pluggable extraction interface — `PatternExtractor` (stub) or `LlmExtractor` (any `LlmProvider`). */
 export interface Extractor {
   /**
    * Extract facts from a single turn. May return synchronously (stub
