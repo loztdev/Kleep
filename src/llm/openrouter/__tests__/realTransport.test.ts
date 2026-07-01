@@ -11,6 +11,19 @@ function sseResponse(events: string[]): Response {
   return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
+/** A `fetch` that never settles on its own — only rejects when its request's AbortSignal fires. */
+function hangingFetch(): jest.Mock {
+  return jest.fn((_url: string | URL, init?: RequestInit) => {
+    return new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    });
+  });
+}
+
 const request: OpenRouterRequest = {
   model: "openai/gpt-4o-mini",
   messages: [{ role: "user", content: "hi" }],
@@ -79,6 +92,19 @@ describe("RealOpenRouterTransport.send", () => {
     const transport = new RealOpenRouterTransport({ apiKey: "k" });
     await expect(transport.send(request)).rejects.toThrow(/HTTP 500/);
   });
+
+  it("aborts and throws a clear error when the connection stalls past the timeout", async () => {
+    jest.useFakeTimers();
+    global.fetch = hangingFetch() as unknown as typeof fetch;
+
+    const transport = new RealOpenRouterTransport({ apiKey: "k", timeoutMs: 5_000 });
+    const promise = transport.send(request);
+    const assertion = expect(promise).rejects.toThrow(/timed out after 5000ms/);
+    await jest.advanceTimersByTimeAsync(5_000);
+    await assertion;
+
+    jest.useRealTimers();
+  });
 });
 
 describe("RealOpenRouterTransport.stream", () => {
@@ -124,5 +150,24 @@ describe("RealOpenRouterTransport.stream", () => {
         }
       })(),
     ).rejects.toThrow(OpenRouterApiError);
+  });
+
+  it("aborts a stalled connection past the idle timeout and surfaces a clear error", async () => {
+    jest.useFakeTimers();
+    global.fetch = hangingFetch() as unknown as typeof fetch;
+
+    const transport = new RealOpenRouterTransport({ apiKey: "k", timeoutMs: 5_000 });
+    const stream = transport.stream(request);
+
+    const drain = (async () => {
+      for await (const _chunk of stream) {
+        // drain
+      }
+    })();
+    const assertion = expect(drain).rejects.toThrow(/timed out after 5000ms/);
+    await jest.advanceTimersByTimeAsync(5_000);
+    await assertion;
+
+    jest.useRealTimers();
   });
 });

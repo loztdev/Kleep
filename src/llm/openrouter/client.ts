@@ -44,6 +44,8 @@ export interface OpenRouterClientOptions {
   baseURL?: string;
   httpReferer?: RealOpenRouterTransportOptions["httpReferer"];
   appTitle?: RealOpenRouterTransportOptions["appTitle"];
+  /** Per-request timeout passed through to `RealOpenRouterTransport`. Default 60s. */
+  timeoutMs?: RealOpenRouterTransportOptions["timeoutMs"];
   /** Pre-built transport — bypasses `apiKey`/`baseURL`. Used by tests and by callers wiring their own. */
   transport?: OpenRouterTransport;
   /** Model used when a call doesn't specify one. No default — see module doc. */
@@ -88,6 +90,7 @@ export class OpenRouterClient implements LlmProvider {
         ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
         ...(opts.httpReferer ? { httpReferer: opts.httpReferer } : {}),
         ...(opts.appTitle ? { appTitle: opts.appTitle } : {}),
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       });
     }
     this.defaultModel = opts.defaultModel;

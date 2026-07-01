@@ -25,6 +25,13 @@ import { OpenRouterApiError } from "./types";
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
+/**
+ * Default per-request timeout. `send()` treats this as a hard deadline;
+ * `stream()` treats it as an idle timeout (reset on every byte received)
+ * so a long-but-active stream isn't killed just for taking a while.
+ */
+export const DEFAULT_TIMEOUT_MS = 60_000;
+
 /** Construction options for `RealOpenRouterTransport`. */
 export interface RealOpenRouterTransportOptions {
   /** OpenRouter API key (`sk-or-...`). */
@@ -35,26 +42,43 @@ export interface RealOpenRouterTransportOptions {
   httpReferer?: string;
   /** Optional `X-Title` header — same purpose as `httpReferer`. */
   appTitle?: string;
+  /** Request timeout in ms — a hard deadline for `send()`, an idle timeout for `stream()`. Default 60s. */
+  timeoutMs?: number;
 }
 
 /** Production `OpenRouterTransport` — talks to the real OpenRouter API. */
 export class RealOpenRouterTransport implements OpenRouterTransport {
-  constructor(private readonly opts: RealOpenRouterTransportOptions) {}
+  private readonly timeoutMs: number;
+
+  constructor(private readonly opts: RealOpenRouterTransportOptions) {
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
 
   async send(request: OpenRouterRequest): Promise<OpenRouterResponse> {
-    const res = await fetch(this.url(), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ ...request, stream: false, usage: { include: true } }),
-    });
-    if (!res.ok) throw await toApiError(res);
-    return (await res.json()) as OpenRouterResponse;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(this.url(), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ ...request, stream: false, usage: { include: true } }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw await toApiError(res);
+      return (await res.json()) as OpenRouterResponse;
+    } catch (err) {
+      throw toTimeoutError(err, this.timeoutMs);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   stream(request: OpenRouterRequest): OpenRouterMessageStream {
     const url = this.url();
     const headers = this.headers();
     const body = JSON.stringify({ ...request, stream: true, usage: { include: true } });
+    const timeoutMs = this.timeoutMs;
+    const controller = new AbortController();
 
     const queue: OpenRouterStreamChunk[] = [];
     let waiters: Array<() => void> = [];
@@ -70,11 +94,21 @@ export class RealOpenRouterTransport implements OpenRouterTransport {
     };
 
     (async () => {
+      // Idle timeout, not a hard deadline: reset on every read so a slow-but-
+      // active stream isn't killed, but a connection that stops sending
+      // anything (server hang, dropped connection) gets aborted instead of
+      // leaving the caller waiting forever.
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const resetIdleTimer = (): void => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => controller.abort(), timeoutMs);
+      };
       try {
-        const res = await fetch(url, { method: "POST", headers, body });
+        resetIdleTimer();
+        const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
         if (!res.ok) throw await toApiError(res);
         if (!res.body) throw new Error("OpenRouter streaming response had no body");
-        for await (const chunk of parseSse(res.body)) {
+        for await (const chunk of parseSse(res.body, resetIdleTimer)) {
           acc.id = chunk.id || acc.id;
           acc.model = chunk.model || acc.model;
           const delta = chunk.choices[0]?.delta;
@@ -87,8 +121,9 @@ export class RealOpenRouterTransport implements OpenRouterTransport {
         }
       } catch (err) {
         hasFailure = true;
-        failureError = err;
+        failureError = toTimeoutError(err, timeoutMs);
       } finally {
+        if (idleTimer) clearTimeout(idleTimer);
         finished = true;
         wake();
       }
@@ -156,19 +191,35 @@ async function toApiError(res: Response): Promise<OpenRouterApiError> {
   return new OpenRouterApiError(res.status, message);
 }
 
+/** Turn a `fetch` abort (from our own timeout, not a caller-supplied signal) into a clear, actionable error. */
+function toTimeoutError(err: unknown, timeoutMs: number): unknown {
+  if (err instanceof Error && err.name === "AbortError") {
+    return new Error(`OpenRouter request timed out after ${timeoutMs}ms`);
+  }
+  return err;
+}
+
 /**
  * Parse a `text/event-stream` body into `OpenRouterStreamChunk`s. SSE
  * events are separated by a blank line; lines starting with `:` are
  * heartbeat comments (OpenRouter sends `: OPENROUTER PROCESSING`) and are
  * ignored, as is the terminal `data: [DONE]` sentinel.
+ *
+ * `onActivity` fires on every raw read (not just parsed events) so a
+ * caller can reset an idle timer on any byte received, not only on
+ * complete SSE events.
  */
-async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<OpenRouterStreamChunk, void, void> {
+async function* parseSse(
+  body: ReadableStream<Uint8Array>,
+  onActivity?: () => void,
+): AsyncGenerator<OpenRouterStreamChunk, void, void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      onActivity?.();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let boundary: number;
