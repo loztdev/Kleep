@@ -44,6 +44,7 @@ import type { LlmProvider } from "../llm";
 import { newId } from "../schema";
 import type { ChatSessionStore, StructuredStore, VectorStore } from "../storage";
 import { generateReply } from "./chatReply";
+import { friendlyErrorMessage } from "./friendlyError";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
@@ -425,21 +426,6 @@ function MessageBubble({
       )}
     </View>
   );
-}
-
-/**
- * Low-level failures (a bare `fetch` rejection reads as "Failed to
- * fetch", a DNS/TLS error as something even less helpful) get a plain-
- * language message instead. Errors this app itself throws with a
- * specific, actionable message (e.g. "no model specified — pass
- * `model`...") are passed through as-is.
- */
-function friendlyErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  if (/fetch|network/i.test(raw)) {
-    return "Couldn't reach the model provider. Check your connection and try again.";
-  }
-  return raw || "Couldn't get a reply. Check your connection and try again.";
 }
 
 const styles = StyleSheet.create({

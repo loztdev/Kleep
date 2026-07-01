@@ -5,6 +5,7 @@
  */
 
 export { OpenRouterClient, StructuredOutputError, type OpenRouterClientOptions } from "./client";
+export { listOpenRouterModels } from "./models";
 export { RealOpenRouterTransport, type RealOpenRouterTransportOptions } from "./realTransport";
 export { type ResolvedRetryOptions, type RetryOptions, isRetryableOpenRouterError } from "./retry";
 export type {

@@ -17,6 +17,7 @@ export {
   type StructuredOutputResult,
 } from "./client";
 export { CostTracker, DEFAULT_PRICING, type CostEntry, type ModelPricing } from "./costTracker";
+export { listClaudeModels } from "./models";
 export { RealTransport, type RealTransportOptions } from "./realTransport";
 export {
   type ResolvedRetryOptions,

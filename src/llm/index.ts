@@ -10,6 +10,7 @@ export type {
   LlmUsage,
 } from "./types";
 export { ClaudeProvider } from "./claudeProvider";
+export type { ModelInfo } from "./modelCatalog";
 export { buildLlmProvider, type BuildLlmProviderOptions, type LlmProviderKind } from "./buildProvider";
 export { CostTracker, type CostEntry } from "./costTracker";
 export {

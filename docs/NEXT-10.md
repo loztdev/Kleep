@@ -262,6 +262,25 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
+## 14. Live model browser ⚡ (not in the original top-10, added by request)
+
+**Why:** Typing a model id by hand is exactly how you end up connected to `z-ai/glm-5.2` when you meant a different id — a live, searchable catalog removes the guessing.
+
+**Built:**
+- `src/llm/openrouter/models.ts` — `listOpenRouterModels()`, `GET /api/v1/models` (public, no key)
+- `src/claude/models.ts` — `listClaudeModels(apiKey)`, `GET /v1/models` with `x-api-key`/`anthropic-version` headers (no typed method for this in the pinned `@anthropic-ai/sdk` version, so a plain fetch)
+- Both normalize to a shared `ModelInfo { id, label, description? }` (`src/llm/modelCatalog.ts`)
+- `src/ui/ModelPickerModal.tsx` — searchable full-screen modal, wired into `ConnectScreen.tsx`'s "Browse" button next to the model field; still just fills in the same free-text field rather than replacing it, so a model id the catalog doesn't happen to list (brand new release, etc.) can still be typed by hand
+- Reused `ChatScreen.tsx`'s friendly-network-error helper (extracted to `src/ui/friendlyError.ts`) so a fetch failure here reads the same plain-language way it does in chat
+
+**Done when:**
+- Both fetchers normalize real API response shapes correctly ✅ — `src/llm/openrouter/__tests__/models.test.ts`, `src/claude/__tests__/models.test.ts`, mocked `fetch`
+- A live catalog actually loads in the picker — **not verified**: this sandbox's egress policy blocks both `openrouter.ai` and (untested either way) `api.anthropic.com`; confirmed instead that the modal's loading/error states render correctly (Playwright) and that the error path shows the friendly message, not a raw "Failed to fetch"
+
+**Depends on:** #11 (OpenRouter client) for `LlmProviderKind`/`buildLlmProvider`; nothing else.
+
+---
+
 ## Suggested execution order
 
 The dependency graph collapses into roughly three waves:
