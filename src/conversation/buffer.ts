@@ -36,6 +36,26 @@ export class ConversationBuffer {
     this.byId.set(turn.id, turn);
   }
 
+  /**
+   * Rebuild a buffer from persisted state (Tier 6) — appends `turns` in
+   * order, then restores the high-water mark and summarized set directly
+   * rather than re-deriving them, since the persisted values are already
+   * known-correct and re-deriving would require re-running extraction/
+   * summarization against the LLM again for no reason.
+   */
+  static fromPersisted(
+    turns: readonly Turn[],
+    opts: { processedCount?: number; summarizedTurnIds?: readonly string[] } = {},
+  ): ConversationBuffer {
+    const buffer = new ConversationBuffer();
+    for (const turn of turns) buffer.append(turn);
+    if (opts.summarizedTurnIds?.length) buffer.markSummarized(opts.summarizedTurnIds);
+    if (opts.processedCount !== undefined) {
+      buffer.highWater = Math.min(opts.processedCount, buffer.turns.length);
+    }
+    return buffer;
+  }
+
   /** Total number of turns appended (processed or not). */
   size(): number {
     return this.turns.length;

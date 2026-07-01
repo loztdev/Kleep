@@ -12,7 +12,7 @@ import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ConnectScreenProps {
-  onConnected: (provider: LlmProvider) => void;
+  onConnected: (provider: LlmProvider, kind: LlmProviderKind, model?: string) => void;
 }
 
 const PROVIDERS: Array<{ kind: LlmProviderKind; label: string; keyHint: string }> = [
@@ -40,7 +40,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
       const provider = buildLlmProvider({ kind, apiKey: trimmedKey, ...(trimmedModel ? { model: trimmedModel } : {}) });
       await saveApiKey(kind, trimmedKey);
       await saveActiveProvider(kind);
-      onConnected(provider);
+      onConnected(provider, kind, trimmedModel || undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect — check the key and try again.");
     } finally {

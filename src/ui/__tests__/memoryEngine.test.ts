@@ -1,11 +1,13 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { ClaudeClient } from "../../claude";
 import type { ClaudeMessageStream, ClaudeRequest, ClaudeTransport } from "../../claude";
-import { TurnRole, type Turn } from "../../conversation";
+import { ConversationBuffer, TurnRole, type Turn } from "../../conversation";
 import { ClaudeProvider, type LlmProvider } from "../../llm";
 import { newId } from "../../schema";
+import { ChatSessionStore } from "../../storage";
+import { openTestDatabase } from "../../storage/__tests__/betterSqliteAdapter";
 import { generateReply } from "../chatReply";
-import { buildMemoryEngine } from "../memoryEngine";
+import { buildMemoryEngine, syncSessionProgress } from "../memoryEngine";
 
 class ScriptedTransport implements ClaudeTransport {
   calls: ClaudeRequest[] = [];
@@ -125,5 +127,35 @@ describe("buildMemoryEngine", () => {
 
     expect(result.summariesProduced).toBe(1);
     expect(result.outcomes[0]!.asset.content).toContain("Sam");
+  });
+});
+
+describe("syncSessionProgress", () => {
+  it("persists the buffer's processed count and summarized turn ids", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    store.appendTurn("s1", { id: "t1", role: TurnRole.USER, content: "a", index: 0 }, 100);
+    store.appendTurn("s1", { id: "t2", role: TurnRole.USER, content: "b", index: 1 }, 100);
+
+    const buffer = ConversationBuffer.fromPersisted(store.loadSession("s1").turns);
+    buffer.markProcessed("t2");
+    buffer.markSummarized(["t1"]);
+
+    syncSessionProgress(store, "s1", buffer);
+
+    const reloaded = store.loadSession("s1");
+    expect(reloaded.processedCount).toBe(2);
+    expect(reloaded.summarizedTurnIds).toEqual(["t1"]);
+  });
+
+  it("is a no-op for summarized ids when nothing is summarized yet", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    store.appendTurn("s1", { id: "t1", role: TurnRole.USER, content: "a", index: 0 }, 100);
+
+    const buffer = ConversationBuffer.fromPersisted(store.loadSession("s1").turns);
+    syncSessionProgress(store, "s1", buffer);
+
+    expect(store.loadSession("s1").summarizedTurnIds).toEqual([]);
   });
 });

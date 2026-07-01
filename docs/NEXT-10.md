@@ -71,21 +71,19 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
-## 4. Persistent structured storage (expo-sqlite) 🧱
+## 4. Persistent structured storage (expo-sqlite) 🧱 ✅ shipped
 
 **Why:** Today everything evaporates on app restart. Without persistence, none of the rest of this matters in production.
 
-**Build:**
-- `src/storage/sqliteStructuredStore.ts` implementing `StructuredStore`
-- Schema: one table per kind for simplicity, or one wide table with JSON columns — bench both
-- Indexes mirror the in-memory ref impl (network/kind/entity-ref/tag/viewpoint)
-- Migrations table + sequenced migration runner
-- One-time import helper from in-memory → SQLite
-- Provenance stored verbatim as JSON column (Why UI reads it back losslessly)
+**Built:**
+- `src/storage/sqliteStructuredStore.ts` implementing `StructuredStore` — one wide table (`structured_assets`) with the full validated asset as a JSON `data` column (provenance round-trips losslessly for the Why UI) plus indexed scalar columns and two junction tables (`structured_asset_entity_refs`, `structured_asset_tags`) mirroring the in-memory ref impl's network/kind/entity-ref/tag/viewpoint indexes
+- `src/storage/sql/schema.ts` — a `migrations` table + sequenced, idempotent migration runner
+- `src/storage/sql/types.ts` — a minimal `SqlDatabase` seam (mirrors the `ClaudeTransport`/`OpenRouterTransport` pattern) so the real logic runs against `expo-sqlite`'s sync API in the app and `better-sqlite3` in tests
+- Went with the **synchronous** `expo-sqlite` API (`execSync`/`runSync`/`getAllSync`/`getFirstSync`, not the `*Async` one) specifically so `StructuredStore`/`VectorStore` — and everything built on them (`MemoryRouter`, `DedupReconciler`, `AutoRetainEngine`) — didn't need an async rewrite
 
 **Done when:**
-- All Tier 1.2 in-memory tests pass against the SQLite impl (parametric test runner)
-- Round-trip restart in the integration test: ingest 100 facts → close → reopen → recall finds them
+- All Tier 1.2 in-memory tests pass against the SQLite impl ✅ — `src/storage/__tests__/structuredStore.contract.ts`, one shared parametric suite run against both `InMemoryStructuredStore` and `SqliteStructuredStore`
+- Round-trip restart in the integration test: ingest 100 facts → close → reopen → recall finds them — **not verified this way**: the contract suite's test databases are `better-sqlite3`'s `:memory:` (fresh per test, by design — full isolation, no cross-test pollution), so it proves query/index correctness against a real SQLite engine but doesn't exercise an actual close-the-handle-and-reopen-the-same-file restart. That specific property can only really be checked against a real on-device file-backed database (`expo-sqlite`'s `openDatabaseSync("kleep.db")`), which needs a device/simulator this sandbox doesn't have.
 
 **Depends on:** nothing.
 
@@ -153,21 +151,20 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
-## 6. Persistent vector storage 🧱
+## 6. Persistent vector storage 🧱 ✅ shipped (scoped — no sqlite-vec)
 
 **Why:** Embeddings need to survive restart just like structured data.
 
-**Build:**
-- `sqlite-vec` extension via `op-sqlite` (better native module than `expo-sqlite` for extensions)
-- `src/storage/sqliteVectorStore.ts` implementing `VectorStore`
-- Dimensionality locked at store-creation time, stored in a metadata table
-- Migration: copy from in-memory at boot if not yet populated
+**Built:**
+- `src/storage/sqliteVectorStore.ts` implementing `VectorStore` — embeddings persist as a JSON column, scored via the exact same cosine-similarity linear scan `InMemoryVectorStore` uses (no `sqlite-vec`/native extension — see below)
+- Dimensionality locked at first upsert; after a reload, inferred from an existing row instead of resetting, so a freshly-opened store doesn't silently forget its own dimension
+- Deliberately skipped `sqlite-vec`/`op-sqlite`: a native SQLite extension bundled via an Expo config plugin is unverifiable from this sandbox (no device to confirm it actually loads) and a real jump in risk for a lore-book size this app will realistically hold in the near term. What this buys is durability across restarts, not query-time acceleration at scale — revisit if lore volume ever makes a linear scan too slow.
 
 **Done when:**
-- Tier 1.2 vector tests pass against the SQLite impl
-- Tier 3 integration test: ingest LORE → close → reopen → semantic recall still finds it
+- Tier 1.2 vector tests pass against the SQLite impl ✅ — `src/storage/__tests__/vectorStore.contract.ts`, run against both `InMemoryVectorStore` and `SqliteVectorStore`
+- Tier 3 integration test: ingest LORE → close → reopen → semantic recall still finds it — **not verified this way**, same `:memory:`-per-test caveat as item #4; real restart durability needs a device
 
-**Depends on:** #2 (need to know vector dimension).
+**Depends on:** #2 (need to know vector dimension) — not blocking in practice, since `StubEmbedder`'s fixed dimension is all either store has ever needed so far.
 
 ---
 
@@ -243,6 +240,28 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
+## 13. Chat sessions + chat list UI ⚡ (not in the original top-10, added by request)
+
+**Why:** #4/#6 give the memory pipeline somewhere durable to live, but there was still exactly one ephemeral conversation and no way to have more than one. "Chat history, stored locally" was the actual ask — a `ChatSessionStore` plus a real navigation surface on top of it.
+
+**Built:**
+- `src/storage/chatSessionStore.ts` — new (not part of the original Tier 6 scope, which only covered the memory stores): `chat_sessions` + `chat_turns` tables, one row per turn with its high-water-mark/summarized state so a reloaded session doesn't need to re-run extraction/summarization against the LLM to recover where it left off
+- `ConversationBuffer.fromPersisted()` (`src/conversation/buffer.ts`) — rebuilds a buffer from persisted turns + restores the processed-count/summarized state directly, rather than re-deriving it
+- `src/ui/ChatListScreen.tsx` (new) — create/rename/delete sessions; `App.tsx` restructured into a `loading → disconnected → chatList → chat` state machine (native), or straight to a single ephemeral `chat` on web (no `sessionStore` there — see Tier 6's web scope note)
+- `src/ui/memoryEngine.ts`'s `buildMemoryEngine()` now takes injectable `structured`/`vector`/`buffer` (defaulting to fresh in-memory, so every existing test and the web fallback path are unchanged) plus a new `syncSessionProgress()` helper that mirrors a buffer's processed/summarized state into its session after each pipeline tick
+
+**Scope call worth flagging:** sessions share ONE continuous memory (`structured`/`vector` live on the connected-provider context, not per-session) — only the conversation transcript is per-chat. That's a deliberate reading of "biomimetic memory" (it should keep learning across conversations, not reset per thread), not an oversight; say so if isolated per-chat memory was actually wanted instead.
+
+**Done when:**
+- `ChatSessionStore` round-trips sessions/turns/high-water-mark/summarized-state ✅ — `src/storage/__tests__/chatSessionStore.test.ts`
+- `ConversationBuffer.fromPersisted()` rebuilds exactly ✅ — new tests in `src/conversation/__tests__/buffer.test.ts`
+- `syncSessionProgress()` persists tick progress correctly ✅ — `src/ui/__tests__/memoryEngine.test.ts`
+- Full app flow (Connect → chat list → new chat → send → close → reopen chat list → same chat shows the same messages) — **not verified end-to-end**: the web fallback path (Connect → ephemeral chat) was re-verified live via Playwright after this restructure and still works, but the native chat-list flow itself needs a real device/simulator this sandbox doesn't have
+
+**Depends on:** #4, #6 (there has to be somewhere for a session's memory writes to land).
+
+---
+
 ## Suggested execution order
 
 The dependency graph collapses into roughly three waves:
@@ -251,7 +270,7 @@ The dependency graph collapses into roughly three waves:
 **Wave 2 (depends on Wave 1):** #3, #5, #6
 **Wave 3 (depends on Waves 1–2):** #7, #8, #9, #10
 
-Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave. Item #12 (Android APK via GitHub Actions) landed the same way, right after #5 — it makes the chat surface installable rather than adding new product surface.
+Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave. Item #12 (Android APK via GitHub Actions) landed the same way, right after #5 — it makes the chat surface installable rather than adding new product surface. Items #4 and #6 (persistence) and #13 (chat sessions + list UI) landed together, by request, ahead of Wave 3 — persistence turned out to be the actual foundation the "usable" milestone was missing, not a later-wave nice-to-have.
 
 If we goal-mode the whole list, that's ~3–4 weeks of focused work at the pace we've been moving. After Wave 2, Kleep is actually usable — and as of #5's first pass + #11, it now technically is (single-screen, non-streaming, no persistence, needs your own API key). After Wave 3, it's a product.
 
