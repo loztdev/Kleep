@@ -28,6 +28,7 @@ export function openTestDatabase(): SqlDatabase {
       return (db.prepare(source).get(...params) ?? null) as T | null;
     },
   };
+  adapter.execSync("PRAGMA foreign_keys = ON;");
   runMigrations(adapter);
   return adapter;
 }

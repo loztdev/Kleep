@@ -13,6 +13,7 @@
 
 import type { LoreSnippet, Network } from "../schema";
 import type { SqlDatabase } from "./sql/types";
+import { withTransaction } from "./sql/transaction";
 import type { VectorQueryFilter, VectorSearchResult, VectorStore } from "./types";
 
 interface Row {
@@ -24,6 +25,40 @@ interface Row {
 function asArray<T>(v: T | readonly T[] | undefined): readonly T[] | undefined {
   if (v === undefined) return undefined;
   return Array.isArray(v) ? (v as readonly T[]) : ([v as T] as const);
+}
+
+/** Builds the shared SELECT for `query()`/`list()` from an optional filter. */
+function buildFilterQuery(filter?: VectorQueryFilter): {
+  sql: string;
+  params: (string | number)[];
+} {
+  const joins: string[] = [];
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filter?.tag !== undefined) {
+    joins.push("JOIN lore_snippet_tags lt ON lt.snippet_id = ls.id AND lt.tag = ?");
+    params.push(filter.tag);
+  }
+  const networks = asArray(filter?.network) as readonly Network[] | undefined;
+  if (networks?.length) {
+    where.push(`ls.network IN (${networks.map(() => "?").join(", ")})`);
+    params.push(...networks);
+  }
+  if (filter?.viewpoint_holder !== undefined) {
+    where.push("ls.viewpoint_holder = ?");
+    params.push(filter.viewpoint_holder);
+  }
+
+  const sql = [
+    "SELECT DISTINCT ls.id, ls.embedding, ls.data FROM lore_snippets ls",
+    ...joins,
+    where.length ? `WHERE ${where.join(" AND ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return { sql, params };
 }
 
 /** Cosine similarity in [-1, 1]; throws on dimension mismatch — mirrors `InMemoryVectorStore`. */
@@ -62,29 +97,31 @@ export class SqliteVectorStore implements VectorStore {
       throw new Error(`embedding dim ${snippet.embedding.length} does not match store dim ${dim}`);
     }
 
-    this.db.runSync(
-      `INSERT INTO lore_snippets (id, network, viewpoint_holder, embedding, data)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         network = excluded.network,
-         viewpoint_holder = excluded.viewpoint_holder,
-         embedding = excluded.embedding,
-         data = excluded.data`,
-      [
-        snippet.id,
-        snippet.network,
-        snippet.viewpoint_holder ?? null,
-        JSON.stringify(snippet.embedding),
-        JSON.stringify(snippet),
-      ],
-    );
-    this.db.runSync("DELETE FROM lore_snippet_tags WHERE snippet_id = ?", [snippet.id]);
-    for (const tag of snippet.tags) {
-      this.db.runSync("INSERT INTO lore_snippet_tags (snippet_id, tag) VALUES (?, ?)", [
-        snippet.id,
-        tag,
-      ]);
-    }
+    withTransaction(this.db, () => {
+      this.db.runSync(
+        `INSERT INTO lore_snippets (id, network, viewpoint_holder, embedding, data)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           network = excluded.network,
+           viewpoint_holder = excluded.viewpoint_holder,
+           embedding = excluded.embedding,
+           data = excluded.data`,
+        [
+          snippet.id,
+          snippet.network,
+          snippet.viewpoint_holder ?? null,
+          JSON.stringify(snippet.embedding),
+          JSON.stringify(snippet),
+        ],
+      );
+      this.db.runSync("DELETE FROM lore_snippet_tags WHERE snippet_id = ?", [snippet.id]);
+      for (const tag of snippet.tags) {
+        this.db.runSync("INSERT INTO lore_snippet_tags (snippet_id, tag) VALUES (?, ?)", [
+          snippet.id,
+          tag,
+        ]);
+      }
+    });
   }
 
   get(id: string): LoreSnippet | undefined {
@@ -107,32 +144,7 @@ export class SqliteVectorStore implements VectorStore {
       throw new Error(`query embedding dim ${embedding.length} does not match store dim ${dim}`);
     }
 
-    const joins: string[] = [];
-    const where: string[] = [];
-    const params: (string | number)[] = [];
-
-    if (filter?.tag !== undefined) {
-      joins.push("JOIN lore_snippet_tags lt ON lt.snippet_id = ls.id AND lt.tag = ?");
-      params.push(filter.tag);
-    }
-    const networks = asArray(filter?.network) as readonly Network[] | undefined;
-    if (networks?.length) {
-      where.push(`ls.network IN (${networks.map(() => "?").join(", ")})`);
-      params.push(...networks);
-    }
-    if (filter?.viewpoint_holder !== undefined) {
-      where.push("ls.viewpoint_holder = ?");
-      params.push(filter.viewpoint_holder);
-    }
-
-    const sql = [
-      "SELECT DISTINCT ls.id, ls.embedding, ls.data FROM lore_snippets ls",
-      ...joins,
-      where.length ? `WHERE ${where.join(" AND ")}` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
+    const { sql, params } = buildFilterQuery(filter);
     const rows = this.db.getAllSync<Row>(sql, params);
     const scored: VectorSearchResult[] = rows.map((row) => ({
       snippet: JSON.parse(row.data) as LoreSnippet,
@@ -143,9 +155,13 @@ export class SqliteVectorStore implements VectorStore {
   }
 
   delete(id: string): boolean {
-    const result = this.db.runSync("DELETE FROM lore_snippets WHERE id = ?", [id]);
-    this.db.runSync("DELETE FROM lore_snippet_tags WHERE snippet_id = ?", [id]);
-    return result.changes > 0;
+    const changed = withTransaction(this.db, () => {
+      const result = this.db.runSync("DELETE FROM lore_snippets WHERE id = ?", [id]);
+      this.db.runSync("DELETE FROM lore_snippet_tags WHERE snippet_id = ?", [id]);
+      return result.changes > 0;
+    });
+    if (changed && this.size() === 0) this.dim = null;
+    return changed;
   }
 
   size(): number {
@@ -154,6 +170,13 @@ export class SqliteVectorStore implements VectorStore {
       [],
     );
     return row?.count ?? 0;
+  }
+
+  /** Every snippet matching `filter` (or all of them), unordered — no embedding needed. */
+  list(filter?: VectorQueryFilter): LoreSnippet[] {
+    const { sql, params } = buildFilterQuery(filter);
+    const rows = this.db.getAllSync<Row>(sql, params);
+    return rows.map((row) => JSON.parse(row.data) as LoreSnippet);
   }
 
   /** Dimension locked at first upsert, or inferred from an existing row after a reload. */

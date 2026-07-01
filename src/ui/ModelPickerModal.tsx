@@ -48,8 +48,12 @@ export function ModelPickerModal({ visible, kind, apiKey, onSelect, onClose }: M
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
-    const fetchModels = kind === "claude" ? listClaudeModels(apiKey.trim()) : listOpenRouterModels();
+    const fetchModels =
+      kind === "claude"
+        ? listClaudeModels(apiKey.trim(), fetch, controller.signal)
+        : listOpenRouterModels(fetch, controller.signal);
     fetchModels
       .then((result) => {
         if (!cancelled) setModels(result);
@@ -62,6 +66,7 @@ export function ModelPickerModal({ visible, kind, apiKey, onSelect, onClose }: M
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [visible, kind, apiKey]);
 
@@ -99,6 +104,7 @@ export function ModelPickerModal({ visible, kind, apiKey, onSelect, onClose }: M
           <FlatList
             data={filtered}
             keyExtractor={(m) => m.id}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.list}
             ListEmptyComponent={<Text style={styles.empty}>No models match "{query}".</Text>}
             renderItem={({ item }) => (

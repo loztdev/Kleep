@@ -13,6 +13,7 @@
 import type { LlmProviderKind } from "../llm";
 import { TurnRole, type Turn } from "../conversation";
 import type { SqlDatabase } from "./sql/types";
+import { withTransaction } from "./sql/transaction";
 
 export interface ChatSessionMeta {
   id: string;
@@ -109,6 +110,20 @@ export class ChatSessionStore {
     ]);
   }
 
+  /**
+   * Corrects a session's stored provider/model metadata to match the
+   * connection it's actually continuing on — doesn't touch `updated_at`,
+   * since merely reopening a chat under a different connection shouldn't
+   * reorder the chat list.
+   */
+  updateProviderMeta(id: string, providerKind: LlmProviderKind, model?: string): void {
+    this.db.runSync("UPDATE chat_sessions SET provider_kind = ?, model = ? WHERE id = ?", [
+      providerKind,
+      model ?? null,
+      id,
+    ]);
+  }
+
   deleteSession(id: string): void {
     this.db.runSync("DELETE FROM chat_sessions WHERE id = ?", [id]);
     this.db.runSync("DELETE FROM chat_turns WHERE session_id = ?", [id]);
@@ -156,6 +171,35 @@ export class ChatSessionStore {
     );
   }
 
+  /**
+   * Truncate from `turnId` and insert `newTurns` in its place, all in one
+   * transaction — the durable half of "regenerate"/"edit" (both discard a
+   * suffix and replay from an earlier point). Callers persist this *before*
+   * mutating `ConversationBuffer` so a failed write never leaves the
+   * in-memory transcript ahead of what's actually saved.
+   */
+  replaceFrom(sessionId: string, turnId: string, newTurns: readonly Turn[], now: number): void {
+    withTransaction(this.db, () => {
+      const target = this.db.getFirstSync<{ turn_index: number }>(
+        "SELECT turn_index FROM chat_turns WHERE session_id = ? AND id = ?",
+        [sessionId, turnId],
+      );
+      if (target) {
+        this.db.runSync("DELETE FROM chat_turns WHERE session_id = ? AND turn_index >= ?", [
+          sessionId,
+          target.turn_index,
+        ]);
+      }
+      for (const turn of newTurns) {
+        this.db.runSync(
+          "INSERT INTO chat_turns (id, session_id, role, content, turn_index, summarized) VALUES (?, ?, ?, ?, ?, 0)",
+          [turn.id, sessionId, turn.role, turn.content, turn.index],
+        );
+      }
+      this.db.runSync("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", [now, sessionId]);
+    });
+  }
+
   updateProcessedCount(sessionId: string, count: number): void {
     this.db.runSync("UPDATE chat_sessions SET processed_count = ? WHERE id = ?", [
       count,
@@ -164,12 +208,12 @@ export class ChatSessionStore {
   }
 
   markSummarized(sessionId: string, turnIds: readonly string[]): void {
-    for (const turnId of turnIds) {
-      this.db.runSync(
-        "UPDATE chat_turns SET summarized = 1 WHERE session_id = ? AND id = ?",
-        [sessionId, turnId],
-      );
-    }
+    if (turnIds.length === 0) return;
+    const placeholders = turnIds.map(() => "?").join(", ");
+    this.db.runSync(
+      `UPDATE chat_turns SET summarized = 1 WHERE session_id = ? AND id IN (${placeholders})`,
+      [sessionId, ...turnIds],
+    );
   }
 
   touchSession(sessionId: string, now: number): void {

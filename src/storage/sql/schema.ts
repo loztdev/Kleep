@@ -33,14 +33,16 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE TABLE IF NOT EXISTS structured_asset_entity_refs (
         asset_id TEXT NOT NULL,
         entity_id TEXT NOT NULL,
-        PRIMARY KEY (asset_id, entity_id)
+        PRIMARY KEY (asset_id, entity_id),
+        FOREIGN KEY (asset_id) REFERENCES structured_assets(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_asset_entity_refs_entity ON structured_asset_entity_refs(entity_id);
 
       CREATE TABLE IF NOT EXISTS structured_asset_tags (
         asset_id TEXT NOT NULL,
         tag TEXT NOT NULL,
-        PRIMARY KEY (asset_id, tag)
+        PRIMARY KEY (asset_id, tag),
+        FOREIGN KEY (asset_id) REFERENCES structured_assets(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_asset_tags_tag ON structured_asset_tags(tag);
 
@@ -57,7 +59,8 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE TABLE IF NOT EXISTS lore_snippet_tags (
         snippet_id TEXT NOT NULL,
         tag TEXT NOT NULL,
-        PRIMARY KEY (snippet_id, tag)
+        PRIMARY KEY (snippet_id, tag),
+        FOREIGN KEY (snippet_id) REFERENCES lore_snippets(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_lore_snippet_tags_tag ON lore_snippet_tags(tag);
 
@@ -77,7 +80,9 @@ const MIGRATIONS: readonly Migration[] = [
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         turn_index INTEGER NOT NULL,
-        summarized INTEGER NOT NULL DEFAULT 0
+        summarized INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (session_id, turn_index),
+        FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns(session_id, turn_index);
     `,

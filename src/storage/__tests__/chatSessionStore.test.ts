@@ -123,6 +123,59 @@ describe("ChatSessionStore", () => {
     expect(store.getSession("s1")?.model).toBeUndefined();
   });
 
+  it("replaceFrom truncates and inserts the new turns in one transaction", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    store.appendTurn("s1", turn("t1", 0), 100);
+    store.appendTurn("s1", turn("t2", 1), 100);
+    store.appendTurn("s1", turn("t3", 2), 100);
+
+    store.replaceFrom("s1", "t2", [turn("t2b", 1, "regenerated")], 500);
+
+    const loaded = store.loadSession("s1");
+    expect(loaded.turns.map((t) => t.id)).toEqual(["t1", "t2b"]);
+    expect(store.getSession("s1")?.updatedAt).toBe(500);
+  });
+
+  it("replaceFrom is a no-op truncate for an unknown turn id, still inserts new turns", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    store.appendTurn("s1", turn("t1", 0), 100);
+
+    store.replaceFrom("s1", "missing", [turn("t2", 1)], 500);
+
+    expect(store.loadSession("s1").turns.map((t) => t.id)).toEqual(["t1", "t2"]);
+  });
+
+  it("updateProviderMeta corrects provider/model without bumping updated_at", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({
+      id: "s1",
+      title: "Chat",
+      providerKind: "claude",
+      model: "opus",
+      now: 100,
+    });
+    store.updateProviderMeta("s1", "openrouter", "z-ai/glm-5.2");
+    const meta = store.getSession("s1");
+    expect(meta?.providerKind).toBe("openrouter");
+    expect(meta?.model).toBe("z-ai/glm-5.2");
+    expect(meta?.updatedAt).toBe(100);
+  });
+
+  it("updateProviderMeta clears model when omitted", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({
+      id: "s1",
+      title: "Chat",
+      providerKind: "claude",
+      model: "opus",
+      now: 100,
+    });
+    store.updateProviderMeta("s1", "openrouter");
+    expect(store.getSession("s1")?.model).toBeUndefined();
+  });
+
   it("returns unique ids passed through newId() without collision", () => {
     const store = new ChatSessionStore(openTestDatabase());
     const a = store.createSession({ id: newId(), title: "A", providerKind: "claude", now: 100 });

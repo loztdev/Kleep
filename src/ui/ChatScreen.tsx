@@ -40,7 +40,7 @@ import {
   View,
 } from "react-native";
 import { ConversationBuffer, TurnRole, type Turn } from "../conversation";
-import type { LlmProvider } from "../llm";
+import type { LlmProvider, LlmProviderKind } from "../llm";
 import { newId } from "../schema";
 import type { ChatSessionStore, StructuredStore, VectorStore } from "../storage";
 import { generateReply } from "./chatReply";
@@ -50,6 +50,8 @@ import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ChatScreenProps {
   provider: LlmProvider;
+  providerKind: LlmProviderKind;
+  model?: string;
   structured: StructuredStore;
   vector: VectorStore;
   /** `null` on web — no persistence there, see `openKleepDatabase.ts`. */
@@ -62,6 +64,8 @@ interface ChatScreenProps {
 
 export function ChatScreen({
   provider,
+  providerKind,
+  model,
   structured,
   vector,
   sessionId,
@@ -69,7 +73,7 @@ export function ChatScreen({
   onDisconnect,
   onBack,
 }: ChatScreenProps) {
-  const engine = useMemo(() => {
+  const { engine, providerMismatch } = useMemo(() => {
     const buffer =
       sessionId && sessionStore
         ? (() => {
@@ -80,7 +84,25 @@ export function ChatScreen({
             });
           })()
         : new ConversationBuffer();
-    return buildMemoryEngine(provider, { structured, vector, buffer });
+
+    // A chat opened under a different provider/model than it was created
+    // with (e.g. reconnected with a different backend) would otherwise
+    // silently keep answering on the new one while the chat list still
+    // shows the old metadata — flag it and correct the stored metadata to
+    // match what's actually happening from here on.
+    let mismatch = false;
+    if (sessionId && sessionStore) {
+      const meta = sessionStore.getSession(sessionId);
+      if (meta && (meta.providerKind !== providerKind || meta.model !== model)) {
+        mismatch = true;
+        sessionStore.updateProviderMeta(sessionId, providerKind, model);
+      }
+    }
+
+    return {
+      engine: buildMemoryEngine(provider, { structured, vector, buffer }),
+      providerMismatch: mismatch,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, structured, vector, sessionId, sessionStore]);
   const [messages, setMessages] = useState<Turn[]>(() => engine.buffer.all().slice());
@@ -96,11 +118,15 @@ export function ChatScreen({
 
   const scrollToEnd = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
 
+  // Persist first, then mirror into `engine.buffer` only once the durable
+  // write has actually succeeded — a failed write throws before the buffer
+  // is touched, so the visible transcript can never run ahead of what's
+  // saved (no rollback needed, since nothing was mutated yet).
   const persistAppend = (turn: Turn) => {
     if (sessionId && sessionStore) sessionStore.appendTurn(sessionId, turn, Date.now());
   };
-  const persistTruncateFrom = (turnId: string) => {
-    if (sessionId && sessionStore) sessionStore.truncateFrom(sessionId, turnId);
+  const persistReplaceFrom = (turnId: string, newTurns: readonly Turn[]) => {
+    if (sessionId && sessionStore) sessionStore.replaceFrom(sessionId, turnId, newTurns, Date.now());
   };
 
   const tickMemoryPipeline = async () => {
@@ -123,16 +149,16 @@ export function ChatScreen({
     const text = input.trim();
     if (!text || sendingRef.current) return;
     sendingRef.current = true;
-
-    const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
-    engine.buffer.append(userTurn);
-    persistAppend(userTurn);
-    setMessages(engine.buffer.all().slice());
-    setInput("");
     setError(null);
     setSending(true);
 
     try {
+      const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
+      persistAppend(userTurn);
+      engine.buffer.append(userTurn);
+      setMessages(engine.buffer.all().slice());
+      setInput("");
+
       const replyText = await generateReply(provider, engine.buffer.liveTurns());
       const assistantTurn: Turn = {
         id: newId(),
@@ -140,8 +166,8 @@ export function ChatScreen({
         content: replyText,
         index: engine.buffer.size(),
       };
-      engine.buffer.append(assistantTurn);
       persistAppend(assistantTurn);
+      engine.buffer.append(assistantTurn);
       setMessages(engine.buffer.all().slice());
       await tickMemoryPipeline();
     } catch (err) {
@@ -157,26 +183,28 @@ export function ChatScreen({
   const handleRegenerate = async (turnId: string) => {
     if (sendingRef.current) return;
     const contextTurns = engine.buffer.contextBefore(turnId);
-    if (!engine.buffer.get(turnId)) return;
+    const target = engine.buffer.get(turnId);
+    if (!target) return;
     sendingRef.current = true;
     setError(null);
     setSending(true);
 
     try {
-      // Compute the new reply from the context *before* this turn first —
-      // only commit (truncate + append) once it succeeds, so a failure
-      // leaves the existing reply in place instead of needing a rollback.
+      // Compute the new reply from the context *before* this turn first,
+      // then persist the truncate+append as one transaction, and only
+      // mirror it into `engine.buffer` once that succeeds — a failure at
+      // any step leaves the existing reply in place with nothing to roll
+      // back, instead of the buffer running ahead of what's saved.
       const replyText = await generateReply(provider, contextTurns);
-      engine.buffer.truncateFrom(turnId);
-      persistTruncateFrom(turnId);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
         content: replyText,
-        index: engine.buffer.size(),
+        index: target.index,
       };
+      persistReplaceFrom(turnId, [assistantTurn]);
+      engine.buffer.truncateFrom(turnId);
       engine.buffer.append(assistantTurn);
-      persistAppend(assistantTurn);
       setMessages(engine.buffer.all().slice());
       await tickMemoryPipeline();
     } catch (err) {
@@ -213,18 +241,16 @@ export function ChatScreen({
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
       const replyText = await generateReply(provider, [...priorTurns, editedTurn]);
-      engine.buffer.truncateFrom(turnId);
-      persistTruncateFrom(turnId);
-      engine.buffer.append(editedTurn);
-      persistAppend(editedTurn);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
         content: replyText,
-        index: engine.buffer.size(),
+        index: target.index + 1,
       };
+      persistReplaceFrom(turnId, [editedTurn, assistantTurn]);
+      engine.buffer.truncateFrom(turnId);
+      engine.buffer.append(editedTurn);
       engine.buffer.append(assistantTurn);
-      persistAppend(assistantTurn);
       setMessages(engine.buffer.all().slice());
       setEditingTurnId(null);
       setEditingText("");
@@ -266,6 +292,13 @@ export function ChatScreen({
           <Text style={styles.disconnect}>Disconnect</Text>
         </Pressable>
       </View>
+
+      {providerMismatch ? (
+        <Text style={styles.providerNotice}>
+          This chat was started on a different provider/model — continuing here on {providerKind}
+          {model ? ` · ${model}` : ""}.
+        </Text>
+      ) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -443,6 +476,13 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerTitle: { fontSize: 20, fontWeight: "700", color: TEXT },
+  providerNotice: {
+    color: MUTED,
+    fontSize: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: SURFACE,
+  },
   disconnect: { color: MUTED, fontSize: 13 },
   messageList: { padding: 16, gap: 4, flexGrow: 1 },
   empty: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 40 },

@@ -27,6 +27,7 @@ export function openKleepDatabase(): SqlDatabase | null {
   if (Platform.OS === "web") return null;
   const db = SQLite.openDatabaseSync(DATABASE_NAME);
   const asSqlDatabase = db as unknown as SqlDatabase;
+  asSqlDatabase.execSync("PRAGMA foreign_keys = ON;");
   runMigrations(asSqlDatabase);
   return asSqlDatabase;
 }

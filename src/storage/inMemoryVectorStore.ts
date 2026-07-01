@@ -110,11 +110,31 @@ export class InMemoryVectorStore implements VectorStore {
 
   /** Remove a snippet by id; returns false if it wasn't there. */
   delete(id: string): boolean {
-    return this.byId.delete(id);
+    const deleted = this.byId.delete(id);
+    if (deleted && this.byId.size === 0) this.dim = null;
+    return deleted;
   }
 
   /** Number of stored snippets. */
   size(): number {
     return this.byId.size;
+  }
+
+  /** Every snippet matching `filter` (or all of them), unordered — no embedding needed. */
+  list(filter?: VectorQueryFilter): LoreSnippet[] {
+    const networks = asArray(filter?.network);
+    const out: LoreSnippet[] = [];
+    for (const snippet of this.byId.values()) {
+      if (networks && !networks.includes(snippet.network as Network)) continue;
+      if (filter?.tag !== undefined && !snippet.tags.includes(filter.tag)) continue;
+      if (
+        filter?.viewpoint_holder !== undefined &&
+        snippet.viewpoint_holder !== filter.viewpoint_holder
+      ) {
+        continue;
+      }
+      out.push(snippet);
+    }
+    return out;
   }
 }

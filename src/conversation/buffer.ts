@@ -51,7 +51,7 @@ export class ConversationBuffer {
     for (const turn of turns) buffer.append(turn);
     if (opts.summarizedTurnIds?.length) buffer.markSummarized(opts.summarizedTurnIds);
     if (opts.processedCount !== undefined) {
-      buffer.highWater = Math.min(opts.processedCount, buffer.turns.length);
+      buffer.highWater = Math.max(0, Math.min(opts.processedCount, buffer.turns.length));
     }
     return buffer;
   }

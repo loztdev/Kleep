@@ -134,6 +134,8 @@ export default function App() {
     <View style={styles.flex}>
       <ChatScreen
         provider={state.ctx.provider}
+        providerKind={state.ctx.providerKind}
+        model={state.ctx.model}
         structured={state.ctx.structured}
         vector={state.ctx.vector}
         sessionId={state.sessionId}

@@ -109,6 +109,17 @@ export function describeVectorStoreContract(
       expect(store.delete(s.id)).toBe(false);
     });
 
+    it("resets dimensionality lock once delete empties the store", () => {
+      const store = makeStore();
+      const s = makeLore([1, 0, 0]);
+      store.upsert(s);
+      expect(store.delete(s.id)).toBe(true);
+      expect(store.size()).toBe(0);
+      // A different embedding dimension is fine now that the store is empty.
+      expect(() => store.upsert(makeLore([1, 0]))).not.toThrow();
+      expect(store.size()).toBe(1);
+    });
+
     it("query on empty store returns empty", () => {
       const store = makeStore();
       expect(store.query([1, 0], 5)).toEqual([]);
@@ -122,6 +133,60 @@ export function describeVectorStoreContract(
       store.upsert(updated);
       expect(store.size()).toBe(1);
       expect(store.get(s.id)?.content).toBe("rewritten");
+    });
+
+    it("list with no filter returns every snippet", () => {
+      const store = makeStore();
+      const a = makeLore([1, 0]);
+      const b = makeLore([0, 1]);
+      store.upsert(a);
+      store.upsert(b);
+      const out = store.list();
+      expect(out.map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
+    });
+
+    it("list filters by network", () => {
+      const store = makeStore();
+      const world = makeLore([1, 0], { network: Network.WORLD });
+      const exp = makeLore([1, 0], { network: Network.EXPERIENCE });
+      store.upsert(world);
+      store.upsert(exp);
+      const out = store.list({ network: Network.WORLD });
+      expect(out).toHaveLength(1);
+      expect(out[0]!.id).toBe(world.id);
+    });
+
+    it("list filters by tag", () => {
+      const store = makeStore();
+      const red = makeLore([1, 0], { tags: ["red"] });
+      const blue = makeLore([1, 0], { tags: ["blue"] });
+      store.upsert(red);
+      store.upsert(blue);
+      const out = store.list({ tag: "red" });
+      expect(out).toHaveLength(1);
+      expect(out[0]!.id).toBe(red.id);
+    });
+
+    it("list filters by viewpoint_holder", () => {
+      const store = makeStore();
+      const alice = makeLore([1, 0], {
+        network: Network.OPINION,
+        viewpoint_holder: "alice",
+      });
+      const bob = makeLore([1, 0], {
+        network: Network.OPINION,
+        viewpoint_holder: "bob",
+      });
+      store.upsert(alice);
+      store.upsert(bob);
+      const out = store.list({ viewpoint_holder: "alice" });
+      expect(out).toHaveLength(1);
+      expect(out[0]!.id).toBe(alice.id);
+    });
+
+    it("list on empty store returns empty", () => {
+      const store = makeStore();
+      expect(store.list()).toEqual([]);
     });
   });
 }

@@ -14,6 +14,7 @@
 
 import type { MemoryAsset, Network, WorldBibleEntry } from "../schema";
 import type { SqlDatabase } from "./sql/types";
+import { withTransaction } from "./sql/transaction";
 import type { StructuredQuery, StructuredStore } from "./types";
 
 type Stored = MemoryAsset | WorldBibleEntry;
@@ -67,10 +68,12 @@ export class SqliteStructuredStore implements StructuredStore {
   }
 
   delete(id: string): boolean {
-    const result = this.db.runSync("DELETE FROM structured_assets WHERE id = ?", [id]);
-    this.db.runSync("DELETE FROM structured_asset_entity_refs WHERE asset_id = ?", [id]);
-    this.db.runSync("DELETE FROM structured_asset_tags WHERE asset_id = ?", [id]);
-    return result.changes > 0;
+    return withTransaction(this.db, () => {
+      const result = this.db.runSync("DELETE FROM structured_assets WHERE id = ?", [id]);
+      this.db.runSync("DELETE FROM structured_asset_entity_refs WHERE asset_id = ?", [id]);
+      this.db.runSync("DELETE FROM structured_asset_tags WHERE asset_id = ?", [id]);
+      return result.changes > 0;
+    });
   }
 
   size(): number {
@@ -82,44 +85,46 @@ export class SqliteStructuredStore implements StructuredStore {
   }
 
   private upsertRow(asset: Stored, entityIdSelf: string | null): void {
-    this.db.runSync(
-      `INSERT INTO structured_assets (id, network, kind, viewpoint_holder, entity_id_self, data)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         network = excluded.network,
-         kind = excluded.kind,
-         viewpoint_holder = excluded.viewpoint_holder,
-         entity_id_self = excluded.entity_id_self,
-         data = excluded.data`,
-      [
-        asset.id,
-        asset.network,
-        asset.kind,
-        asset.viewpoint_holder ?? null,
-        entityIdSelf,
-        JSON.stringify(asset),
-      ],
-    );
-
-    // Simplest-correct approach to keeping junction tables in sync on
-    // update: clear this asset's rows, then re-insert from scratch.
-    this.db.runSync("DELETE FROM structured_asset_entity_refs WHERE asset_id = ?", [asset.id]);
-    this.db.runSync("DELETE FROM structured_asset_tags WHERE asset_id = ?", [asset.id]);
-
-    const entityRefs = new Set<string>(asset.entity_ids);
-    if (isWorldBibleEntry(asset)) entityRefs.add(asset.entity_id);
-    for (const entityId of entityRefs) {
+    withTransaction(this.db, () => {
       this.db.runSync(
-        "INSERT INTO structured_asset_entity_refs (asset_id, entity_id) VALUES (?, ?)",
-        [asset.id, entityId],
+        `INSERT INTO structured_assets (id, network, kind, viewpoint_holder, entity_id_self, data)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           network = excluded.network,
+           kind = excluded.kind,
+           viewpoint_holder = excluded.viewpoint_holder,
+           entity_id_self = excluded.entity_id_self,
+           data = excluded.data`,
+        [
+          asset.id,
+          asset.network,
+          asset.kind,
+          asset.viewpoint_holder ?? null,
+          entityIdSelf,
+          JSON.stringify(asset),
+        ],
       );
-    }
-    for (const tag of asset.tags) {
-      this.db.runSync(
-        "INSERT INTO structured_asset_tags (asset_id, tag) VALUES (?, ?)",
-        [asset.id, tag],
-      );
-    }
+
+      // Simplest-correct approach to keeping junction tables in sync on
+      // update: clear this asset's rows, then re-insert from scratch.
+      this.db.runSync("DELETE FROM structured_asset_entity_refs WHERE asset_id = ?", [asset.id]);
+      this.db.runSync("DELETE FROM structured_asset_tags WHERE asset_id = ?", [asset.id]);
+
+      const entityRefs = new Set<string>(asset.entity_ids);
+      if (isWorldBibleEntry(asset)) entityRefs.add(asset.entity_id);
+      for (const entityId of entityRefs) {
+        this.db.runSync(
+          "INSERT INTO structured_asset_entity_refs (asset_id, entity_id) VALUES (?, ?)",
+          [asset.id, entityId],
+        );
+      }
+      for (const tag of asset.tags) {
+        this.db.runSync(
+          "INSERT INTO structured_asset_tags (asset_id, tag) VALUES (?, ?)",
+          [asset.id, tag],
+        );
+      }
+    });
   }
 }
 

@@ -65,6 +65,7 @@ export function ChatListScreen({
           data={sessions}
           keyExtractor={(s) => s.id}
           contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <View style={styles.row}>
               {renamingId === item.id ? (
