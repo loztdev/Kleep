@@ -1,17 +1,20 @@
 /**
- * Tier 5.1 — ClaudeExtractor.
+ * Tier 5.1 — LlmExtractor.
  *
  * Replaces `PatternExtractor`'s regex matching with a structured-output
- * Claude call: one forced tool call (`extract_facts`) per turn, validated
- * against a Zod schema that mirrors `ExtractedFact`. Two things are
- * deliberately NOT this class's job, because `AutoRetainEngine` already
- * does them for every `Extractor`:
+ * LLM call: one forced tool call (`extract_facts`) per turn, validated
+ * against a Zod schema that mirrors `ExtractedFact`. Works against any
+ * `LlmProvider` — Claude (via `ClaudeProvider`) or OpenRouter — since the
+ * prompting and validation here don't depend on which backend answers it.
  *
- * - Anchor verification — Claude returns `quote`; the engine re-checks it's
- *   a verbatim substring of the turn and throws `ExtractionAnchorError` if
- *   not (anti-hallucination guard).
+ * Two things are deliberately NOT this class's job, because
+ * `AutoRetainEngine` already does them for every `Extractor`:
+ *
+ * - Anchor verification — the model returns `quote`; the engine re-checks
+ *   it's a verbatim substring of the turn and throws `ExtractionAnchorError`
+ *   if not (anti-hallucination guard).
  * - Disposition-aware confidence calibration — the engine's skepticism gate
- *   maps Claude's self-reported `confidence` through `confidenceFloor` /
+ *   maps the model's self-reported `confidence` through `confidenceFloor` /
  *   `mentionsRequired`.
  *
  * What this class does own: prompting, caching identical turn content so a
@@ -20,7 +23,7 @@
  */
 
 import { z } from "zod";
-import type { ClaudeClient } from "../claude";
+import type { LlmProvider } from "../llm";
 import { MemoryKind, Network } from "../schema";
 import type { Turn } from "../conversation";
 import { fnv1aHash } from "../util/hash";
@@ -128,9 +131,10 @@ Rules:
 - confidence in [0, 1]: how directly and unambiguously the quote supports the fact.
 - If the turn contains nothing worth extracting, call the tool with an empty facts array.`;
 
-/** Construction options for `ClaudeExtractor`. */
-export interface ClaudeExtractorOptions {
-  client: ClaudeClient;
+/** Construction options for `LlmExtractor`. */
+export interface LlmExtractorOptions {
+  /** Any `LlmProvider` — `new ClaudeProvider(claudeClient)`, an `OpenRouterClient`, or a future one. */
+  client: LlmProvider;
   /** Overrides the client's default model for extraction calls. */
   model?: string;
   /** `max_tokens` for the extraction call. Default 1024. */
@@ -143,12 +147,12 @@ export interface ClaudeExtractorOptions {
   cacheSize?: number;
 }
 
-/** Claude-backed `Extractor` — structured-output extraction with caching by turn-content hash. */
-export class ClaudeExtractor implements Extractor {
+/** LLM-backed `Extractor` — structured-output extraction with caching by turn-content hash. Works with any `LlmProvider`. */
+export class LlmExtractor implements Extractor {
   private readonly cache = new Map<string, readonly ExtractedFact[]>();
   private readonly cacheSize: number;
 
-  constructor(private readonly opts: ClaudeExtractorOptions) {
+  constructor(private readonly opts: LlmExtractorOptions) {
     this.cacheSize = opts.cacheSize ?? 200;
   }
 
@@ -157,10 +161,10 @@ export class ClaudeExtractor implements Extractor {
     const cached = this.cache.get(key);
     if (cached) return cached;
 
-    // totalUsd()-delta assumes no concurrent extract() call shares this
-    // client's costTracker mid-flight — true today since AutoRetainEngine
-    // processes turns sequentially (for...await), not in parallel.
-    const costBefore = this.opts.client.costTracker.totalUsd();
+    // totalCostUsd()-delta assumes no concurrent extract() call shares this
+    // client mid-flight — true today since AutoRetainEngine processes
+    // turns sequentially (for...await), not in parallel.
+    const costBefore = this.opts.client.totalCostUsd();
     const result = await this.opts.client.structured({
       ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
       maxTokens: this.opts.maxTokens ?? 1024,
@@ -172,7 +176,7 @@ export class ClaudeExtractor implements Extractor {
         schema: ExtractionResultSchema,
       },
     });
-    this.checkCostCap(turn, this.opts.client.costTracker.totalUsd() - costBefore);
+    this.checkCostCap(turn, this.opts.client.totalCostUsd() - costBefore);
 
     const facts = result.data.facts as readonly ExtractedFact[];
     this.cacheSet(key, facts);
@@ -185,7 +189,7 @@ export class ClaudeExtractor implements Extractor {
     if (this.opts.onCostCapExceeded) {
       this.opts.onCostCapExceeded({ turnId: turn.id, costUsd, capUsd });
     } else {
-      console.warn(`ClaudeExtractor: turn ${turn.id} cost $${costUsd.toFixed(4)}, over cap $${capUsd.toFixed(4)}`);
+      console.warn(`LlmExtractor: turn ${turn.id} cost $${costUsd.toFixed(4)}, over cap $${capUsd.toFixed(4)}`);
     }
   }
 

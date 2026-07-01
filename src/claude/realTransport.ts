@@ -11,7 +11,7 @@ import type { ClaudeMessageStream, ClaudeRequest, ClaudeTransport } from "./type
 
 /** Construction options for `RealTransport`. */
 export interface RealTransportOptions {
-  /** Anthropic API key. Loading it from SecureStore is the caller's job — see `secureKeyStore.ts`. */
+  /** Anthropic API key. Loading it from SecureStore is the caller's job — see `src/llm/secureKeyStore.ts`. */
   apiKey: string;
   /** Override the API host, e.g. for a proxy. */
   baseURL?: string;

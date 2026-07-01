@@ -1,42 +1,44 @@
 /**
- * Tier 5.3 — ClaudeSummarizer.
+ * Tier 5.3 — LlmSummarizer.
  *
  * Replaces `StubSummarizer`'s placeholder string with a real "state
  * delta" prompt: given a window of turns, produce one paragraph of what
- * changed (inventory, locations, relationships). Output is validated
- * (length cap, must reference at least one capitalized name pulled from
- * the source turns when one exists) before being accepted; on either an
- * API failure or a validation miss, this falls back to `StubSummarizer`
- * so `RollingSummarizer.tick()` never blocks on a flaky call.
+ * changed (inventory, locations, relationships). Works against any
+ * `LlmProvider` — Claude (via `ClaudeProvider`) or OpenRouter. Output is
+ * validated (length cap, must reference at least one capitalized name
+ * pulled from the source turns when one exists) before being accepted; on
+ * either an API failure or a validation miss, this falls back to
+ * `StubSummarizer` so `RollingSummarizer.tick()` never blocks on a flaky
+ * call.
  */
 
-import type Anthropic from "@anthropic-ai/sdk";
-import type { ClaudeClient } from "../claude";
+import type { LlmProvider } from "../llm";
 import type { Turn } from "../conversation";
 import { StubSummarizer } from "./stubSummarizer";
 import type { Summarizer } from "./types";
 
 const DEFAULT_MAX_WORDS = 120;
 
-/** Construction options for `ClaudeSummarizer`. */
-export interface ClaudeSummarizerOptions {
-  client: ClaudeClient;
+/** Construction options for `LlmSummarizer`. */
+export interface LlmSummarizerOptions {
+  /** Any `LlmProvider` — `new ClaudeProvider(claudeClient)`, an `OpenRouterClient`, or a future one. */
+  client: LlmProvider;
   /** Overrides the client's default model for summarization calls. */
   model?: string;
   /** `max_tokens` for the summarization call. Default 400. */
   maxTokens?: number;
   /** Word-count cap enforced on the returned delta. Default 120. */
   maxWords?: number;
-  /** Used when the Claude call fails or its output doesn't validate. Defaults to a fresh `StubSummarizer`. */
+  /** Used when the call fails or its output doesn't validate. Defaults to a fresh `StubSummarizer`. */
   fallback?: Summarizer;
 }
 
-/** Claude-backed `Summarizer` — real state-delta prompt with a stub fallback on failure. */
-export class ClaudeSummarizer implements Summarizer {
+/** LLM-backed `Summarizer` — real state-delta prompt with a stub fallback on failure. Works with any `LlmProvider`. */
+export class LlmSummarizer implements Summarizer {
   private readonly maxWords: number;
   private readonly fallback: Summarizer;
 
-  constructor(private readonly opts: ClaudeSummarizerOptions) {
+  constructor(private readonly opts: LlmSummarizerOptions) {
     this.maxWords = opts.maxWords ?? DEFAULT_MAX_WORDS;
     this.fallback = opts.fallback ?? new StubSummarizer();
   }
@@ -45,13 +47,13 @@ export class ClaudeSummarizer implements Summarizer {
     if (turns.length === 0) return Promise.resolve(this.fallback.summarize(turns));
 
     try {
-      const message = await this.opts.client.sendMessage({
+      const result = await this.opts.client.sendMessage({
         ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
         maxTokens: this.opts.maxTokens ?? 400,
         system: systemPrompt(this.maxWords),
         messages: [{ role: "user", content: turnsPrompt(turns) }],
       });
-      const text = extractText(message);
+      const text = result.text.trim();
       if (isValidSummary(text, turns, this.maxWords)) return text;
       return Promise.resolve(this.fallback.summarize(turns));
     } catch {
@@ -69,14 +71,6 @@ Given a window of conversation turns, produce ONE paragraph capturing what chang
 function turnsPrompt(turns: readonly Turn[]): string {
   const lines = turns.map((t) => `[${t.id}] ${t.role}: ${t.content}`);
   return `Turns:\n${lines.join("\n")}`;
-}
-
-function extractText(message: Anthropic.Message): string {
-  return message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
 }
 
 /** Length cap plus a "mentions a real name" grounding check (skipped when the source has no capitalized names to check against). */
