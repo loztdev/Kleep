@@ -1,0 +1,49 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # GitHub-hosted ubuntu-latest runners ship with the Android SDK
+      # preinstalled (ANDROID_HOME set, licenses pre-accepted), so no
+      # separate SDK install step is needed — just a JDK for Gradle.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Generate native Android project (expo prebuild)
+        run: npx expo prebuild --platform android --non-interactive
+
+      # Debug build: Gradle auto-generates a debug keystore, so the APK
+      # is installable straight away with no signing secrets to manage.
+      # Swap to `assembleRelease` + a configured signing key once this
+      # needs to ship to real users instead of testers.
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kleep-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

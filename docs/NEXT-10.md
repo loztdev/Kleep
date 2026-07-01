@@ -98,16 +98,19 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 **Built (first pass — no navigation stack yet, single screen):**
 - `App.tsx` now gates on a connect flow instead of the Expo placeholder: `src/ui/ConnectScreen.tsx` (pick Claude or OpenRouter, paste an API key, optional model override) → `src/ui/ChatScreen.tsx`
 - Chat screen: message list (plain `ScrollView` — not `FlashList` yet), composer, send button, empty state
+- Dark theme throughout (`app.json`'s `userInterfaceStyle: "dark"`, backed by `expo-system-ui` so it actually applies on native, not just component-level styling)
+- Per-message actions: assistant replies can be **regenerated** (re-run `generateReply` over the same context) or **copied** (`expo-clipboard`); user messages can be **edited**. Both regenerate and edit compute the new reply *before* mutating the buffer — `ConversationBuffer.contextBefore()`/`truncateFrom()` — so a failed call leaves the existing conversation untouched instead of needing a rollback. These are "branch" operations in the sense that they discard the target turn (and anything after it) and replay from there; since Tier 6 persistence doesn't exist, the discarded suffix isn't kept as a switchable alternate branch, just dropped
 - Wire to `ConversationBuffer` via `src/ui/memoryEngine.ts`; each user/AI message becomes a `Turn`
 - `AutoRetainEngine` and `RollingSummarizer` both tick after every assistant reply (best-effort — a flaky extraction call surfaces as a `console.warn`, not a crashed chat)
 - Empty state explaining what the app does
 - Deliberately **non-streaming** (`sendMessage`, not `streamMessage`) — React Native's `fetch` doesn't reliably support streaming response bodies across platforms (especially Android) without extra polyfills; shipping a reliable v1 beat a flaky streaming one. Both `OpenRouterClient` and `ClaudeProvider` already support `streamMessage` for whenever that's worth revisiting.
-- No React Navigation stack, no long-press quick-action menu (Why UI placeholder), no persistence (Tier 6) — conversation and everything the memory pipeline learned reset on reload
+- No React Navigation stack, no long-press quick-action menu (Why UI placeholder), no persisted/switchable branches, no persistence (Tier 6) — conversation and everything the memory pipeline learned reset on reload
 
 **Done when:**
-- `npm run web` renders a working chat ✅ — verified by hand: connect flow → send a message → (in this dev sandbox, the network call to the configured provider is blocked by egress policy, so this specifically exercised and confirmed the *error-handling* path — a clean inline banner, no crash) → see `src/ui/__tests__/memoryEngine.test.ts` for the automated equivalent (scripted transport, no real network) proving a real reply **does** flow through `AutoRetainEngine`/`RollingSummarizer` correctly
-- `npm run ios` + `npm run android` boot without crashing — **not verified**, no simulators available in this sandbox
+- `npm run web` renders a working chat ✅ — verified by hand: connect flow → send a message → (in this dev sandbox, the network call to the configured provider is blocked by egress policy, so this specifically exercised and confirmed the *error-handling* path — a clean inline banner, no crash) plus the dark theme rendering and the edit interaction (inline text field, cancel/confirm icons) → see `src/ui/__tests__/memoryEngine.test.ts` for the automated equivalent (scripted transport, no real network) proving a real reply **does** flow through `AutoRetainEngine`/`RollingSummarizer` correctly, and `src/conversation/__tests__/buffer.test.ts` for `contextBefore`/`truncateFrom`
+- `npm run ios` + `npm run android` boot without crashing — **not verified**, no simulators available in this sandbox (see #12 for a real device-installable build via CI instead)
 - A 10-turn conversation triggers the full pipeline and the World Bible reflects what was said — verified at small scale via the automated test above; not run manually for 10 real turns (no live provider access from this sandbox)
+- Regenerate/edit produce a fresh reply and don't corrupt the buffer on failure — verified via the `contextBefore`/`truncateFrom` unit tests; not run against a real model round-trip for the same egress reason as above
 
 **Depends on:** #1 for real responses — now also runs on OpenRouter (see below), not just Claude.
 
@@ -128,6 +131,23 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 - Manual smoke test against the real OpenRouter API — **not run**: this sandbox's egress proxy hard-denies `openrouter.ai` outright (confirmed via the proxy's own status endpoint as a policy denial, not a transient failure) even with a real key provided. Run `scripts/openrouter-smoke.ts` somewhere with network access to verify the live wire format.
 
 **Depends on:** nothing new — reuses #1's Zod→tool-schema converter (now provider-agnostic at `src/llm/zodToJsonSchema.ts`) and hash utility.
+
+---
+
+## 12. Android APK build via GitHub Actions ⚡ (not in the original top-10, added by request)
+
+**Why:** #5 shipped a working chat screen, but nobody could actually install it on a phone without a local Android/EAS toolchain. A CI-built APK closes that gap with zero paid services or secrets.
+
+**Built:**
+- `.github/workflows/android-apk.yml` — on push to `main`, PRs into `main`, and manual dispatch: `npx expo prebuild --platform android` generates the native project fresh (not committed — `android/`/`ios/` stay gitignored, matching managed-workflow convention), then `./gradlew assembleDebug` builds a debug-signed (auto-generated keystore, no secrets needed) APK, uploaded as a workflow artifact
+- `app.json`: added `android.package` (`dev.loztdev.kleep`, required for `expo prebuild`) and `expo-system-ui` so `userInterfaceStyle: "dark"` actually takes effect natively, not just via component-level styling
+- GitHub-hosted `ubuntu-latest` runners ship with the Android SDK preinstalled, so the workflow only needs a JDK (`actions/setup-java`) on top of Node — no SDK install step
+
+**Done when:**
+- `expo prebuild --platform android` resolves cleanly against `app.json` ✅ — run locally in this sandbox as a sanity check (the generated `android/` dir was deleted afterward, matching `.gitignore`)
+- A pushed commit produces a downloadable, installable debug APK — **not verified**: GitHub Actions itself can't be executed from this sandbox, so the workflow is untested end-to-end until it runs for real on `origin`
+
+**Depends on:** #5 (there has to be an app worth installing first).
 
 ---
 
@@ -229,7 +249,7 @@ The dependency graph collapses into roughly three waves:
 **Wave 2 (depends on Wave 1):** #3, #5, #6
 **Wave 3 (depends on Waves 1–2):** #7, #8, #9, #10
 
-Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave.
+Item #11 (OpenRouter + generic provider interface) landed alongside Wave 2 by request, ahead of its natural spot — it generalizes #1 rather than depending on a later wave. Item #12 (Android APK via GitHub Actions) landed the same way, right after #5 — it makes the chat surface installable rather than adding new product surface.
 
 If we goal-mode the whole list, that's ~3–4 weeks of focused work at the pace we've been moving. After Wave 2, Kleep is actually usable — and as of #5's first pass + #11, it now technically is (single-screen, non-streaming, no persistence, needs your own API key). After Wave 3, it's a product.
 

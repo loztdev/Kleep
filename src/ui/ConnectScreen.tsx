@@ -70,6 +70,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
       <TextInput
         style={styles.input}
         placeholder={PROVIDERS.find((p) => p.kind === kind)?.keyHint}
+        placeholderTextColor="#8e8e93"
         value={apiKey}
         onChangeText={setApiKey}
         autoCapitalize="none"
@@ -80,6 +81,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
       <TextInput
         style={styles.input}
         placeholder="Model override (optional)"
+        placeholderTextColor="#8e8e93"
         value={model}
         onChangeText={setModel}
         autoCapitalize="none"
@@ -96,10 +98,17 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
   );
 }
 
+const BG = "#000000";
+const SURFACE = "#1c1c1e";
+const BORDER = "#2c2c2e";
+const TEXT = "#ececec";
+const MUTED = "#8e8e93";
+const ACCENT = "#2563eb";
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: BG,
     justifyContent: "center",
     padding: 24,
     gap: 12,
@@ -107,10 +116,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: "700",
+    color: TEXT,
   },
   subtitle: {
     fontSize: 14,
-    color: "#666",
+    color: MUTED,
     marginBottom: 12,
   },
   providerRow: {
@@ -121,35 +131,38 @@ const styles = StyleSheet.create({
   providerButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: "center",
   },
   providerButtonActive: {
-    borderColor: "#2563eb",
-    backgroundColor: "#eff6ff",
+    borderColor: ACCENT,
+    backgroundColor: "#132038",
   },
   providerButtonText: {
-    color: "#333",
+    color: MUTED,
     fontWeight: "600",
   },
   providerButtonTextActive: {
-    color: "#2563eb",
+    color: "#7ea6f5",
   },
   input: {
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    color: TEXT,
   },
   error: {
-    color: "#dc2626",
+    color: "#ff453a",
   },
   connectButton: {
-    backgroundColor: "#2563eb",
+    backgroundColor: ACCENT,
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: "center",

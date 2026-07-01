@@ -51,6 +51,26 @@ export class ConversationBuffer {
     return this.turns;
   }
 
+  /**
+   * Remove the turn with `turnId` and every turn after it — the primitive
+   * behind "edit message" and "regenerate reply" (both discard a suffix of
+   * the conversation and replay from an earlier point). Returns the
+   * removed turns in their original order; a no-op returning `[]` if
+   * `turnId` isn't found. Clamps the high-water mark and drops any
+   * `summarized` marks for the removed turns.
+   */
+  truncateFrom(turnId: string): Turn[] {
+    const idx = this.turns.findIndex((t) => t.id === turnId);
+    if (idx < 0) return [];
+    const removed = this.turns.splice(idx);
+    for (const t of removed) {
+      this.byId.delete(t.id);
+      this.summarized.delete(t.id);
+    }
+    if (this.highWater > this.turns.length) this.highWater = this.turns.length;
+    return removed;
+  }
+
   /** Turns appended since `markProcessed` was last called. */
   pendingTurns(): readonly Turn[] {
     return this.turns.slice(this.highWater);
@@ -90,6 +110,17 @@ export class ConversationBuffer {
   /** Turns currently visible to prompt assembly (not yet summarized). */
   liveTurns(): readonly Turn[] {
     return this.turns.filter((t) => !this.summarized.has(t.id));
+  }
+
+  /**
+   * Live (non-summarized) turns strictly before `turnId` — the context a
+   * "regenerate" or "edit" flow replays from. Returns `[]` if `turnId`
+   * isn't found.
+   */
+  contextBefore(turnId: string): readonly Turn[] {
+    const idx = this.turns.findIndex((t) => t.id === turnId);
+    if (idx < 0) return [];
+    return this.turns.slice(0, idx).filter((t) => !this.summarized.has(t.id));
   }
 
   /** Sum of estimated tokens over live (non-summarized) turns. */

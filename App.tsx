@@ -51,8 +51,8 @@ export default function App() {
   if (state.status === "loading") {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
-        <StatusBar style="auto" />
+        <ActivityIndicator color="#8e8e93" />
+        <StatusBar style="light" />
       </View>
     );
   }
@@ -61,7 +61,7 @@ export default function App() {
     return (
       <View style={styles.flex}>
         <ConnectScreen onConnected={(provider) => setState({ status: "connected", provider })} />
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </View>
     );
   }
@@ -69,12 +69,12 @@ export default function App() {
   return (
     <View style={styles.flex}>
       <ChatScreen provider={state.provider} onDisconnect={handleDisconnect} />
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: "#fff" },
-  center: { flex: 1, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
+  flex: { flex: 1, backgroundColor: "#000" },
+  center: { flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
 });

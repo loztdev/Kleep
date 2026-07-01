@@ -60,4 +60,79 @@ describe("ConversationBuffer", () => {
     b.append(turn("t2", "b", 1));
     expect(b.pendingTurns().map((t) => t.id)).toEqual(["t2"]);
   });
+
+  describe("contextBefore", () => {
+    it("returns every turn strictly before the given id", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      b.append(turn("t2", "b", 1));
+      b.append(turn("t3", "c", 2));
+
+      expect(b.contextBefore("t3").map((t) => t.id)).toEqual(["t1", "t2"]);
+      expect(b.contextBefore("t1")).toEqual([]);
+    });
+
+    it("excludes turns already summarized", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      b.append(turn("t2", "b", 1));
+      b.append(turn("t3", "c", 2));
+      b.markSummarized(["t1"]);
+
+      expect(b.contextBefore("t3").map((t) => t.id)).toEqual(["t2"]);
+    });
+
+    it("returns [] for an unknown turn id", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      expect(b.contextBefore("missing")).toEqual([]);
+    });
+  });
+
+  describe("truncateFrom", () => {
+    it("removes the given turn and everything after it, returning the removed turns in order", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      b.append(turn("t2", "b", 1));
+      b.append(turn("t3", "c", 2));
+
+      const removed = b.truncateFrom("t2");
+
+      expect(removed.map((t) => t.id)).toEqual(["t2", "t3"]);
+      expect(b.all().map((t) => t.id)).toEqual(["t1"]);
+      expect(b.size()).toBe(1);
+      expect(b.get("t2")).toBeUndefined();
+    });
+
+    it("is a no-op returning [] for an unknown turn id", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+
+      expect(b.truncateFrom("missing")).toEqual([]);
+      expect(b.size()).toBe(1);
+    });
+
+    it("clamps the high-water mark when the removed turns were already processed", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      b.append(turn("t2", "b", 1));
+      b.markProcessed("t2");
+
+      b.truncateFrom("t2");
+
+      expect(b.processedCount()).toBe(1);
+    });
+
+    it("clears summarized marks for removed turns", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      b.append(turn("t2", "b", 1));
+      b.markSummarized(["t1", "t2"]);
+
+      b.truncateFrom("t2");
+
+      expect(b.isSummarized("t1")).toBe(true);
+      expect(b.isSummarized("t2")).toBe(false);
+    });
+  });
 });
