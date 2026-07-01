@@ -9,10 +9,11 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
 import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
+import { ModelPickerModal } from "./ModelPickerModal";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ConnectScreenProps {
-  onConnected: (provider: LlmProvider) => void;
+  onConnected: (provider: LlmProvider, kind: LlmProviderKind, model?: string) => void;
 }
 
 const PROVIDERS: Array<{ kind: LlmProviderKind; label: string; keyHint: string }> = [
@@ -26,6 +27,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
   const [model, setModel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const handleConnect = async () => {
     const trimmedKey = apiKey.trim();
@@ -40,7 +42,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
       const provider = buildLlmProvider({ kind, apiKey: trimmedKey, ...(trimmedModel ? { model: trimmedModel } : {}) });
       await saveApiKey(kind, trimmedKey);
       await saveActiveProvider(kind);
-      onConnected(provider);
+      onConnected(provider, kind, trimmedModel || undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect — check the key and try again.");
     } finally {
@@ -79,22 +81,41 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
         secureTextEntry
         editable={!connecting}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Model override (optional)"
-        placeholderTextColor={MUTED}
-        value={model}
-        onChangeText={setModel}
-        autoCapitalize="none"
-        autoCorrect={false}
-        editable={!connecting}
-      />
+      <View style={styles.modelRow}>
+        <TextInput
+          style={[styles.input, styles.modelInput]}
+          placeholder="Model override (optional)"
+          placeholderTextColor={MUTED}
+          value={model}
+          onChangeText={setModel}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!connecting}
+        />
+        <Pressable
+          style={styles.browseButton}
+          onPress={() => setPickerVisible(true)}
+          disabled={connecting}
+          accessibilityRole="button"
+          accessibilityLabel="Browse models"
+        >
+          <Text style={styles.browseButtonText}>Browse</Text>
+        </Pressable>
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Pressable style={styles.connectButton} onPress={handleConnect} disabled={connecting}>
         {connecting ? <ActivityIndicator color="#fff" /> : <Text style={styles.connectButtonText}>Connect</Text>}
       </Pressable>
+
+      <ModelPickerModal
+        visible={pickerVisible}
+        kind={kind}
+        apiKey={apiKey}
+        onSelect={setModel}
+        onClose={() => setPickerVisible(false)}
+      />
     </View>
   );
 }
@@ -151,6 +172,25 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     color: TEXT,
+  },
+  modelRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  modelInput: {
+    flex: 1,
+  },
+  browseButton: {
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    justifyContent: "center",
+  },
+  browseButtonText: {
+    color: TEXT,
+    fontWeight: "600",
   },
   error: {
     color: ERROR,

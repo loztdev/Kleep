@@ -89,6 +89,44 @@ describe("ConversationBuffer", () => {
     });
   });
 
+  describe("fromPersisted", () => {
+    it("rebuilds a buffer with turns in order", () => {
+      const b = ConversationBuffer.fromPersisted([turn("t1", "a", 0), turn("t2", "b", 1)]);
+      expect(b.all().map((t) => t.id)).toEqual(["t1", "t2"]);
+      expect(b.size()).toBe(2);
+    });
+
+    it("restores the processed-turn high-water mark directly, without needing a turn id", () => {
+      const b = ConversationBuffer.fromPersisted(
+        [turn("t1", "a", 0), turn("t2", "b", 1), turn("t3", "c", 2)],
+        { processedCount: 2 },
+      );
+      expect(b.processedCount()).toBe(2);
+      expect(b.pendingTurns().map((t) => t.id)).toEqual(["t3"]);
+    });
+
+    it("clamps a persisted processedCount that exceeds the turn count", () => {
+      const b = ConversationBuffer.fromPersisted([turn("t1", "a", 0)], { processedCount: 99 });
+      expect(b.processedCount()).toBe(1);
+    });
+
+    it("restores the summarized set", () => {
+      const b = ConversationBuffer.fromPersisted(
+        [turn("t1", "a", 0), turn("t2", "b", 1)],
+        { summarizedTurnIds: ["t1"] },
+      );
+      expect(b.isSummarized("t1")).toBe(true);
+      expect(b.isSummarized("t2")).toBe(false);
+      expect(b.liveTurns().map((t) => t.id)).toEqual(["t2"]);
+    });
+
+    it("defaults to an empty, unprocessed buffer with no options", () => {
+      const b = ConversationBuffer.fromPersisted([]);
+      expect(b.size()).toBe(0);
+      expect(b.processedCount()).toBe(0);
+    });
+  });
+
   describe("truncateFrom", () => {
     it("removes the given turn and everything after it, returning the removed turns in order", () => {
       const b = new ConversationBuffer();

@@ -11,14 +11,18 @@
  * Per-message actions: an assistant reply can be regenerated or copied; a
  * user message can be edited. Both regenerate and edit are "branch"
  * operations in the sense that they discard everything after the target
- * turn and replay from there — this app has no persistence yet (Tier 6),
- * so the discarded suffix isn't kept around as a switchable alternate
- * branch, just dropped. Both compute the new reply *before* mutating the
- * buffer, so a failed regenerate/edit leaves the existing conversation
- * untouched instead of needing a rollback.
+ * turn and replay from there — the discarded suffix isn't kept around as
+ * a switchable alternate branch, just dropped (see NEXT-10.md's Tier 12
+ * note on the known gap: already-extracted facts from a discarded turn
+ * currently linger in the shared memory stores). Both compute the new
+ * reply *before* mutating the buffer, so a failed regenerate/edit leaves
+ * the existing conversation untouched instead of needing a rollback.
  *
- * No persistence yet (Tier 6) — the conversation and everything the
- * memory pipeline learned from it are gone on reload. That's expected.
+ * Persistence (Tier 6, native only — `sessionId`/`sessionStore` are `null`
+ * on web, see `openKleepDatabase.ts`): every buffer mutation here is
+ * mirrored into `ChatSessionStore` so the transcript survives a restart.
+ * `structured`/`vector` are NOT per-chat — every session shares the same
+ * continuous memory, only the transcript is per-session.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -35,21 +39,75 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { TurnRole, type Turn } from "../conversation";
-import type { LlmProvider } from "../llm";
+import { ConversationBuffer, TurnRole, type Turn } from "../conversation";
+import type { LlmProvider, LlmProviderKind } from "../llm";
 import { newId } from "../schema";
+import type { ChatSessionStore, StructuredStore, VectorStore } from "../storage";
 import { generateReply } from "./chatReply";
-import { buildMemoryEngine } from "./memoryEngine";
+import { friendlyErrorMessage } from "./friendlyError";
+import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ChatScreenProps {
   provider: LlmProvider;
+  providerKind: LlmProviderKind;
+  model?: string;
+  structured: StructuredStore;
+  vector: VectorStore;
+  /** `null` on web — no persistence there, see `openKleepDatabase.ts`. */
+  sessionId: string | null;
+  sessionStore: ChatSessionStore | null;
   onDisconnect: () => void;
+  onOpenMemory: () => void;
+  /** Present only when there's a chat list to go back to (native). */
+  onBack?: () => void;
 }
 
-export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
-  const engine = useMemo(() => buildMemoryEngine(provider), [provider]);
-  const [messages, setMessages] = useState<Turn[]>([]);
+export function ChatScreen({
+  provider,
+  providerKind,
+  model,
+  structured,
+  vector,
+  sessionId,
+  sessionStore,
+  onDisconnect,
+  onOpenMemory,
+  onBack,
+}: ChatScreenProps) {
+  const { engine, providerMismatch } = useMemo(() => {
+    const buffer =
+      sessionId && sessionStore
+        ? (() => {
+            const loaded = sessionStore.loadSession(sessionId);
+            return ConversationBuffer.fromPersisted(loaded.turns, {
+              processedCount: loaded.processedCount,
+              summarizedTurnIds: loaded.summarizedTurnIds,
+            });
+          })()
+        : new ConversationBuffer();
+
+    // A chat opened under a different provider/model than it was created
+    // with (e.g. reconnected with a different backend) would otherwise
+    // silently keep answering on the new one while the chat list still
+    // shows the old metadata — flag it and correct the stored metadata to
+    // match what's actually happening from here on.
+    let mismatch = false;
+    if (sessionId && sessionStore) {
+      const meta = sessionStore.getSession(sessionId);
+      if (meta && (meta.providerKind !== providerKind || meta.model !== model)) {
+        mismatch = true;
+        sessionStore.updateProviderMeta(sessionId, providerKind, model);
+      }
+    }
+
+    return {
+      engine: buildMemoryEngine(provider, { structured, vector, buffer }),
+      providerMismatch: mismatch,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, structured, vector, sessionId, sessionStore]);
+  const [messages, setMessages] = useState<Turn[]>(() => engine.buffer.all().slice());
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +119,17 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
   const sendingRef = useRef(false);
 
   const scrollToEnd = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+
+  // Persist first, then mirror into `engine.buffer` only once the durable
+  // write has actually succeeded — a failed write throws before the buffer
+  // is touched, so the visible transcript can never run ahead of what's
+  // saved (no rollback needed, since nothing was mutated yet).
+  const persistAppend = (turn: Turn) => {
+    if (sessionId && sessionStore) sessionStore.appendTurn(sessionId, turn, Date.now());
+  };
+  const persistReplaceFrom = (turnId: string, newTurns: readonly Turn[]) => {
+    if (sessionId && sessionStore) sessionStore.replaceFrom(sessionId, turnId, newTurns, Date.now());
+  };
 
   const tickMemoryPipeline = async () => {
     // Memory-pipeline ticks are best-effort: a flaky extraction/summary
@@ -75,21 +144,23 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
     } catch (err) {
       console.warn("RollingSummarizer.tick failed:", err);
     }
+    if (sessionId && sessionStore) syncSessionProgress(sessionStore, sessionId, engine.buffer);
   };
 
   const handleSend = async () => {
     const text = input.trim();
     if (!text || sendingRef.current) return;
     sendingRef.current = true;
-
-    const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
-    engine.buffer.append(userTurn);
-    setMessages(engine.buffer.all().slice());
-    setInput("");
     setError(null);
     setSending(true);
 
     try {
+      const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
+      persistAppend(userTurn);
+      engine.buffer.append(userTurn);
+      setMessages(engine.buffer.all().slice());
+      setInput("");
+
       const replyText = await generateReply(provider, engine.buffer.liveTurns());
       const assistantTurn: Turn = {
         id: newId(),
@@ -97,6 +168,7 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
         content: replyText,
         index: engine.buffer.size(),
       };
+      persistAppend(assistantTurn);
       engine.buffer.append(assistantTurn);
       setMessages(engine.buffer.all().slice());
       await tickMemoryPipeline();
@@ -113,23 +185,27 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
   const handleRegenerate = async (turnId: string) => {
     if (sendingRef.current) return;
     const contextTurns = engine.buffer.contextBefore(turnId);
-    if (!engine.buffer.get(turnId)) return;
+    const target = engine.buffer.get(turnId);
+    if (!target) return;
     sendingRef.current = true;
     setError(null);
     setSending(true);
 
     try {
-      // Compute the new reply from the context *before* this turn first —
-      // only commit (truncate + append) once it succeeds, so a failure
-      // leaves the existing reply in place instead of needing a rollback.
+      // Compute the new reply from the context *before* this turn first,
+      // then persist the truncate+append as one transaction, and only
+      // mirror it into `engine.buffer` once that succeeds — a failure at
+      // any step leaves the existing reply in place with nothing to roll
+      // back, instead of the buffer running ahead of what's saved.
       const replyText = await generateReply(provider, contextTurns);
-      engine.buffer.truncateFrom(turnId);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
         content: replyText,
-        index: engine.buffer.size(),
+        index: target.index,
       };
+      persistReplaceFrom(turnId, [assistantTurn]);
+      engine.buffer.truncateFrom(turnId);
       engine.buffer.append(assistantTurn);
       setMessages(engine.buffer.all().slice());
       await tickMemoryPipeline();
@@ -167,14 +243,15 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
       const replyText = await generateReply(provider, [...priorTurns, editedTurn]);
-      engine.buffer.truncateFrom(turnId);
-      engine.buffer.append(editedTurn);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
         content: replyText,
-        index: engine.buffer.size(),
+        index: target.index + 1,
       };
+      persistReplaceFrom(turnId, [editedTurn, assistantTurn]);
+      engine.buffer.truncateFrom(turnId);
+      engine.buffer.append(editedTurn);
       engine.buffer.append(assistantTurn);
       setMessages(engine.buffer.all().slice());
       setEditingTurnId(null);
@@ -205,11 +282,35 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Kleep</Text>
-        <Pressable onPress={onDisconnect}>
-          <Text style={styles.disconnect}>Disconnect</Text>
-        </Pressable>
+        <View style={styles.headerLeft}>
+          {onBack ? (
+            <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back to chats">
+              <Ionicons name="chevron-back-outline" size={22} color={TEXT} />
+            </Pressable>
+          ) : null}
+          <Text style={styles.headerTitle}>Kleep</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <Pressable
+            onPress={onOpenMemory}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Open memory browser"
+          >
+            <Ionicons name="library-outline" size={20} color={MUTED} />
+          </Pressable>
+          <Pressable onPress={onDisconnect}>
+            <Text style={styles.disconnect}>Disconnect</Text>
+          </Pressable>
+        </View>
       </View>
+
+      {providerMismatch ? (
+        <Text style={styles.providerNotice}>
+          This chat was started on a different provider/model — continuing here on {providerKind}
+          {model ? ` · ${model}` : ""}.
+        </Text>
+      ) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -372,21 +473,6 @@ function MessageBubble({
   );
 }
 
-/**
- * Low-level failures (a bare `fetch` rejection reads as "Failed to
- * fetch", a DNS/TLS error as something even less helpful) get a plain-
- * language message instead. Errors this app itself throws with a
- * specific, actionable message (e.g. "no model specified — pass
- * `model`...") are passed through as-is.
- */
-function friendlyErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  if (/fetch|network/i.test(raw)) {
-    return "Couldn't reach the model provider. Check your connection and try again.";
-  }
-  return raw || "Couldn't get a reply. Check your connection and try again.";
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: BG },
   header: {
@@ -400,7 +486,16 @@ const styles = StyleSheet.create({
     borderBottomColor: BORDER,
     backgroundColor: BG,
   },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 16 },
   headerTitle: { fontSize: 20, fontWeight: "700", color: TEXT },
+  providerNotice: {
+    color: MUTED,
+    fontSize: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: SURFACE,
+  },
   disconnect: { color: MUTED, fontSize: 13 },
   messageList: { padding: 16, gap: 4, flexGrow: 1 },
   empty: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 40 },

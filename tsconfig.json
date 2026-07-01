@@ -2,7 +2,13 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "types": ["jest", "node"]
+    "types": ["jest", "node"],
+    // Metro resolves `./foo` to `foo.native.ts`/`foo.web.ts` per bundle
+    // target (see openKleepDatabase.native.ts/.web.ts); tsc has no
+    // platform concept, so this just picks one variant (native) to
+    // type-check imports against — both files are still independently
+    // checked since they match `include` below.
+    "moduleSuffixes": [".native", ""]
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "ts-node": {

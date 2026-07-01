@@ -112,4 +112,12 @@ export interface VectorStore {
 
   /** Number of stored snippets. */
   size(): number;
+
+  /**
+   * Every stored snippet matching `filter` (or all of them, with no
+   * filter), unordered — no embedding required. For browsing the lore
+   * book (Tier 7.5), not semantic search; `query()` is still the right
+   * call for "what's relevant to this text".
+   */
+  list(filter?: VectorQueryFilter): LoreSnippet[];
 }
