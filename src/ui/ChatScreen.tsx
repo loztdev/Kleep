@@ -8,10 +8,21 @@
  * streaming one. `OpenRouterClient`/`ClaudeProvider` both already support
  * `streamMessage` for whenever that's worth revisiting.
  *
+ * Per-message actions: an assistant reply can be regenerated or copied; a
+ * user message can be edited. Both regenerate and edit are "branch"
+ * operations in the sense that they discard everything after the target
+ * turn and replay from there — this app has no persistence yet (Tier 6),
+ * so the discarded suffix isn't kept around as a switchable alternate
+ * branch, just dropped. Both compute the new reply *before* mutating the
+ * buffer, so a failed regenerate/edit leaves the existing conversation
+ * untouched instead of needing a rollback.
+ *
  * No persistence yet (Tier 6) — the conversation and everything the
  * memory pipeline learned from it are gone on reload. That's expected.
  */
 
+import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -29,6 +40,7 @@ import type { LlmProvider } from "../llm";
 import { newId } from "../schema";
 import { generateReply } from "./chatReply";
 import { buildMemoryEngine } from "./memoryEngine";
+import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ChatScreenProps {
   provider: LlmProvider;
@@ -41,10 +53,29 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
   const scrollRef = useRef<ScrollView>(null);
   // `sending` (state) lags a render behind a tap, so a fast double-tap can
-  // slip through before the button disables — this ref guard is synchronous.
+  // slip through before any button disables — this ref guard is synchronous.
   const sendingRef = useRef(false);
+
+  const scrollToEnd = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+
+  const tickMemoryPipeline = async () => {
+    // Memory-pipeline ticks are best-effort: a flaky extraction/summary
+    // call shouldn't take the chat down. Log and move on.
+    try {
+      await engine.autoRetain.tick();
+    } catch (err) {
+      console.warn("AutoRetainEngine.tick failed:", err);
+    }
+    try {
+      await engine.rollingSummarizer.tick();
+    } catch (err) {
+      console.warn("RollingSummarizer.tick failed:", err);
+    }
+  };
 
   const handleSend = async () => {
     const text = input.trim();
@@ -53,7 +84,7 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
 
     const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
     engine.buffer.append(userTurn);
-    setMessages((prev) => [...prev, userTurn]);
+    setMessages(engine.buffer.all().slice());
     setInput("");
     setError(null);
     setSending(true);
@@ -67,27 +98,103 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
         index: engine.buffer.size(),
       };
       engine.buffer.append(assistantTurn);
-      setMessages((prev) => [...prev, assistantTurn]);
-
-      // Memory-pipeline ticks are best-effort: a flaky extraction/summary
-      // call shouldn't take the chat down. Log and move on.
-      try {
-        await engine.autoRetain.tick();
-      } catch (err) {
-        console.warn("AutoRetainEngine.tick failed:", err);
-      }
-      try {
-        await engine.rollingSummarizer.tick();
-      } catch (err) {
-        console.warn("RollingSummarizer.tick failed:", err);
-      }
+      setMessages(engine.buffer.all().slice());
+      await tickMemoryPipeline();
     } catch (err) {
       console.error("generateReply failed:", err);
       setError(friendlyErrorMessage(err));
     } finally {
       sendingRef.current = false;
       setSending(false);
-      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+      scrollToEnd();
+    }
+  };
+
+  const handleRegenerate = async (turnId: string) => {
+    if (sendingRef.current) return;
+    const contextTurns = engine.buffer.contextBefore(turnId);
+    if (!engine.buffer.get(turnId)) return;
+    sendingRef.current = true;
+    setError(null);
+    setSending(true);
+
+    try {
+      // Compute the new reply from the context *before* this turn first —
+      // only commit (truncate + append) once it succeeds, so a failure
+      // leaves the existing reply in place instead of needing a rollback.
+      const replyText = await generateReply(provider, contextTurns);
+      engine.buffer.truncateFrom(turnId);
+      const assistantTurn: Turn = {
+        id: newId(),
+        role: TurnRole.ASSISTANT,
+        content: replyText,
+        index: engine.buffer.size(),
+      };
+      engine.buffer.append(assistantTurn);
+      setMessages(engine.buffer.all().slice());
+      await tickMemoryPipeline();
+    } catch (err) {
+      console.error("regenerate failed:", err);
+      setError(friendlyErrorMessage(err));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+      scrollToEnd();
+    }
+  };
+
+  const startEdit = (turn: Turn) => {
+    if (sendingRef.current) return;
+    setEditingTurnId(turn.id);
+    setEditingText(turn.content);
+  };
+
+  const cancelEdit = () => {
+    setEditingTurnId(null);
+    setEditingText("");
+  };
+
+  const submitEdit = async (turnId: string) => {
+    const text = editingText.trim();
+    if (!text || sendingRef.current) return;
+    const priorTurns = engine.buffer.contextBefore(turnId);
+    const target = engine.buffer.get(turnId);
+    if (!target) return;
+    sendingRef.current = true;
+    setError(null);
+    setSending(true);
+
+    try {
+      const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
+      const replyText = await generateReply(provider, [...priorTurns, editedTurn]);
+      engine.buffer.truncateFrom(turnId);
+      engine.buffer.append(editedTurn);
+      const assistantTurn: Turn = {
+        id: newId(),
+        role: TurnRole.ASSISTANT,
+        content: replyText,
+        index: engine.buffer.size(),
+      };
+      engine.buffer.append(assistantTurn);
+      setMessages(engine.buffer.all().slice());
+      setEditingTurnId(null);
+      setEditingText("");
+      await tickMemoryPipeline();
+    } catch (err) {
+      console.error("edit-resend failed:", err);
+      setError(friendlyErrorMessage(err));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+      scrollToEnd();
+    }
+  };
+
+  const handleCopy = async (text: string) => {
+    try {
+      await Clipboard.setStringAsync(text);
+    } catch (err) {
+      console.warn("Copy to clipboard failed:", err);
     }
   };
 
@@ -116,17 +223,22 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
           </Text>
         ) : (
           messages.map((turn) => (
-            <View
+            <MessageBubble
               key={turn.id}
-              style={[styles.bubble, turn.role === TurnRole.USER ? styles.bubbleUser : styles.bubbleAssistant]}
-            >
-              <Text style={turn.role === TurnRole.USER ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
-                {turn.content}
-              </Text>
-            </View>
+              turn={turn}
+              disabled={sending}
+              isEditing={editingTurnId === turn.id}
+              editingText={editingText}
+              onEditingTextChange={setEditingText}
+              onStartEdit={() => startEdit(turn)}
+              onCancelEdit={cancelEdit}
+              onSubmitEdit={() => submitEdit(turn.id)}
+              onRegenerate={() => handleRegenerate(turn.id)}
+              onCopy={() => handleCopy(turn.content)}
+            />
           ))
         )}
-        {sending ? <ActivityIndicator style={styles.thinking} /> : null}
+        {sending ? <ActivityIndicator style={styles.thinking} color="#8e8e93" /> : null}
       </ScrollView>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -137,6 +249,7 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
           value={input}
           onChangeText={setInput}
           placeholder="Message Kleep..."
+          placeholderTextColor="#8e8e93"
           multiline
           editable={!sending}
         />
@@ -149,6 +262,113 @@ export function ChatScreen({ provider, onDisconnect }: ChatScreenProps) {
         </Pressable>
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+interface MessageBubbleProps {
+  turn: Turn;
+  disabled: boolean;
+  isEditing: boolean;
+  editingText: string;
+  onEditingTextChange: (text: string) => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSubmitEdit: () => void;
+  onRegenerate: () => void;
+  onCopy: () => void;
+}
+
+function MessageBubble({
+  turn,
+  disabled,
+  isEditing,
+  editingText,
+  onEditingTextChange,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
+  onRegenerate,
+  onCopy,
+}: MessageBubbleProps) {
+  const isUser = turn.role === TurnRole.USER;
+  if (turn.role !== TurnRole.USER && turn.role !== TurnRole.ASSISTANT) return null;
+
+  return (
+    <View style={isUser ? styles.bubbleWrapUser : styles.bubbleWrapAssistant}>
+      <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}>
+        {isEditing ? (
+          <TextInput
+            style={styles.editInput}
+            value={editingText}
+            onChangeText={onEditingTextChange}
+            multiline
+            autoFocus
+            placeholderTextColor={MUTED}
+          />
+        ) : (
+          <Text style={isUser ? styles.bubbleTextUser : styles.bubbleTextAssistant}>{turn.content}</Text>
+        )}
+      </View>
+
+      {isEditing ? (
+        <View style={styles.actionsRow}>
+          <Pressable
+            onPress={onCancelEdit}
+            style={styles.iconButton}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel edit"
+          >
+            <Ionicons name="close-outline" size={18} color={MUTED} />
+          </Pressable>
+          <Pressable
+            onPress={onSubmitEdit}
+            style={styles.iconButton}
+            hitSlop={8}
+            disabled={!editingText.trim()}
+            accessibilityRole="button"
+            accessibilityLabel="Save edit and resend"
+          >
+            <Ionicons name="checkmark-outline" size={18} color={editingText.trim() ? "#fff" : "#555"} />
+          </Pressable>
+        </View>
+      ) : isUser ? (
+        <View style={styles.actionsRow}>
+          <Pressable
+            onPress={onStartEdit}
+            style={styles.iconButton}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel="Edit message"
+          >
+            <Ionicons name="pencil-outline" size={16} color={MUTED} />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.actionsRow}>
+          <Pressable
+            onPress={onCopy}
+            style={styles.iconButton}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Copy reply"
+          >
+            <Ionicons name="copy-outline" size={16} color={MUTED} />
+          </Pressable>
+          <Pressable
+            onPress={onRegenerate}
+            style={styles.iconButton}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel="Regenerate reply"
+          >
+            <Ionicons name="refresh-outline" size={16} color={MUTED} />
+          </Pressable>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -168,7 +388,7 @@ function friendlyErrorMessage(err: unknown): string {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
+  flex: { flex: 1, backgroundColor: BG },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -177,38 +397,47 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ddd",
+    borderBottomColor: BORDER,
+    backgroundColor: BG,
   },
-  headerTitle: { fontSize: 20, fontWeight: "700" },
-  disconnect: { color: "#888", fontSize: 13 },
-  messageList: { padding: 16, gap: 10, flexGrow: 1 },
-  empty: { color: "#888", fontSize: 14, textAlign: "center", marginTop: 40 },
-  bubble: { maxWidth: "85%", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleUser: { alignSelf: "flex-end", backgroundColor: "#2563eb" },
-  bubbleAssistant: { alignSelf: "flex-start", backgroundColor: "#f1f1f3" },
+  headerTitle: { fontSize: 20, fontWeight: "700", color: TEXT },
+  disconnect: { color: MUTED, fontSize: 13 },
+  messageList: { padding: 16, gap: 4, flexGrow: 1 },
+  empty: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 40 },
+  bubbleWrapUser: { alignSelf: "flex-end", alignItems: "flex-end", maxWidth: "85%", marginBottom: 10 },
+  bubbleWrapAssistant: { alignSelf: "flex-start", alignItems: "flex-start", maxWidth: "85%", marginBottom: 10 },
+  bubble: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleUser: { backgroundColor: ACCENT },
+  bubbleAssistant: { backgroundColor: SURFACE },
   bubbleTextUser: { color: "#fff", fontSize: 15 },
-  bubbleTextAssistant: { color: "#111", fontSize: 15 },
+  bubbleTextAssistant: { color: TEXT, fontSize: 15 },
+  editInput: { color: TEXT, fontSize: 15, minWidth: 160, padding: 0 },
+  actionsRow: { flexDirection: "row", gap: 4, marginTop: 4 },
+  iconButton: { padding: 4 },
   thinking: { marginTop: 4, alignSelf: "flex-start" },
-  error: { color: "#dc2626", paddingHorizontal: 16, paddingBottom: 4, fontSize: 13 },
+  error: { color: ERROR, paddingHorizontal: 16, paddingBottom: 4, fontSize: 13 },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
     padding: 12,
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#ddd",
+    borderTopColor: BORDER,
+    backgroundColor: BG,
   },
   composerInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 10,
     maxHeight: 120,
     fontSize: 15,
+    color: TEXT,
   },
-  sendButton: { backgroundColor: "#2563eb", borderRadius: 18, paddingHorizontal: 18, paddingVertical: 10 },
-  sendButtonDisabled: { backgroundColor: "#a9c2f0" },
+  sendButton: { backgroundColor: ACCENT, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 10 },
+  sendButtonDisabled: { backgroundColor: "#1e3a6b" },
   sendButtonText: { color: "#fff", fontWeight: "700" },
 });

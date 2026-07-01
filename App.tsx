@@ -5,6 +5,7 @@ import { ChatScreen } from "./src/ui/ChatScreen";
 import { ConnectScreen } from "./src/ui/ConnectScreen";
 import { buildLlmProvider, type LlmProvider } from "./src/llm";
 import { clearApiKey, loadActiveProvider, loadApiKey } from "./src/llm/secureKeyStore";
+import { BG, MUTED } from "./src/ui/theme";
 
 type AppState =
   | { status: "loading" }
@@ -51,8 +52,8 @@ export default function App() {
   if (state.status === "loading") {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
-        <StatusBar style="auto" />
+        <ActivityIndicator color={MUTED} />
+        <StatusBar style="light" />
       </View>
     );
   }
@@ -61,7 +62,7 @@ export default function App() {
     return (
       <View style={styles.flex}>
         <ConnectScreen onConnected={(provider) => setState({ status: "connected", provider })} />
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </View>
     );
   }
@@ -69,12 +70,12 @@ export default function App() {
   return (
     <View style={styles.flex}>
       <ChatScreen provider={state.provider} onDisconnect={handleDisconnect} />
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: "#fff" },
-  center: { flex: 1, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
+  flex: { flex: 1, backgroundColor: BG },
+  center: { flex: 1, backgroundColor: BG, alignItems: "center", justifyContent: "center" },
 });
