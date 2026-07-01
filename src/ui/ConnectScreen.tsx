@@ -9,6 +9,7 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
 import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
+import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ConnectScreenProps {
   onConnected: (provider: LlmProvider) => void;
@@ -70,7 +71,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
       <TextInput
         style={styles.input}
         placeholder={PROVIDERS.find((p) => p.kind === kind)?.keyHint}
-        placeholderTextColor="#8e8e93"
+        placeholderTextColor={MUTED}
         value={apiKey}
         onChangeText={setApiKey}
         autoCapitalize="none"
@@ -81,7 +82,7 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
       <TextInput
         style={styles.input}
         placeholder="Model override (optional)"
-        placeholderTextColor="#8e8e93"
+        placeholderTextColor={MUTED}
         value={model}
         onChangeText={setModel}
         autoCapitalize="none"
@@ -97,13 +98,6 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
     </View>
   );
 }
-
-const BG = "#000000";
-const SURFACE = "#1c1c1e";
-const BORDER = "#2c2c2e";
-const TEXT = "#ececec";
-const MUTED = "#8e8e93";
-const ACCENT = "#2563eb";
 
 const styles = StyleSheet.create({
   container: {
@@ -159,7 +153,7 @@ const styles = StyleSheet.create({
     color: TEXT,
   },
   error: {
-    color: "#ff453a",
+    color: ERROR,
   },
   connectButton: {
     backgroundColor: ACCENT,

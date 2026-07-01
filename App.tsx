@@ -5,6 +5,7 @@ import { ChatScreen } from "./src/ui/ChatScreen";
 import { ConnectScreen } from "./src/ui/ConnectScreen";
 import { buildLlmProvider, type LlmProvider } from "./src/llm";
 import { clearApiKey, loadActiveProvider, loadApiKey } from "./src/llm/secureKeyStore";
+import { BG, MUTED } from "./src/ui/theme";
 
 type AppState =
   | { status: "loading" }
@@ -51,7 +52,7 @@ export default function App() {
   if (state.status === "loading") {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#8e8e93" />
+        <ActivityIndicator color={MUTED} />
         <StatusBar style="light" />
       </View>
     );
@@ -75,6 +76,6 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: "#000" },
-  center: { flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
+  flex: { flex: 1, backgroundColor: BG },
+  center: { flex: 1, backgroundColor: BG, alignItems: "center", justifyContent: "center" },
 });

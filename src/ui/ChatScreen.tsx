@@ -40,6 +40,7 @@ import type { LlmProvider } from "../llm";
 import { newId } from "../schema";
 import { generateReply } from "./chatReply";
 import { buildMemoryEngine } from "./memoryEngine";
+import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ChatScreenProps {
   provider: LlmProvider;
@@ -302,7 +303,7 @@ function MessageBubble({
             onChangeText={onEditingTextChange}
             multiline
             autoFocus
-            placeholderTextColor="#8e8e93"
+            placeholderTextColor={MUTED}
           />
         ) : (
           <Text style={isUser ? styles.bubbleTextUser : styles.bubbleTextAssistant}>{turn.content}</Text>
@@ -311,26 +312,59 @@ function MessageBubble({
 
       {isEditing ? (
         <View style={styles.actionsRow}>
-          <Pressable onPress={onCancelEdit} style={styles.iconButton} hitSlop={8}>
-            <Ionicons name="close-outline" size={18} color="#8e8e93" />
+          <Pressable
+            onPress={onCancelEdit}
+            style={styles.iconButton}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel edit"
+          >
+            <Ionicons name="close-outline" size={18} color={MUTED} />
           </Pressable>
-          <Pressable onPress={onSubmitEdit} style={styles.iconButton} hitSlop={8} disabled={!editingText.trim()}>
+          <Pressable
+            onPress={onSubmitEdit}
+            style={styles.iconButton}
+            hitSlop={8}
+            disabled={!editingText.trim()}
+            accessibilityRole="button"
+            accessibilityLabel="Save edit and resend"
+          >
             <Ionicons name="checkmark-outline" size={18} color={editingText.trim() ? "#fff" : "#555"} />
           </Pressable>
         </View>
       ) : isUser ? (
         <View style={styles.actionsRow}>
-          <Pressable onPress={onStartEdit} style={styles.iconButton} hitSlop={8} disabled={disabled}>
-            <Ionicons name="pencil-outline" size={16} color="#8e8e93" />
+          <Pressable
+            onPress={onStartEdit}
+            style={styles.iconButton}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel="Edit message"
+          >
+            <Ionicons name="pencil-outline" size={16} color={MUTED} />
           </Pressable>
         </View>
       ) : (
         <View style={styles.actionsRow}>
-          <Pressable onPress={onCopy} style={styles.iconButton} hitSlop={8}>
-            <Ionicons name="copy-outline" size={16} color="#8e8e93" />
+          <Pressable
+            onPress={onCopy}
+            style={styles.iconButton}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Copy reply"
+          >
+            <Ionicons name="copy-outline" size={16} color={MUTED} />
           </Pressable>
-          <Pressable onPress={onRegenerate} style={styles.iconButton} hitSlop={8} disabled={disabled}>
-            <Ionicons name="refresh-outline" size={16} color="#8e8e93" />
+          <Pressable
+            onPress={onRegenerate}
+            style={styles.iconButton}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel="Regenerate reply"
+          >
+            <Ionicons name="refresh-outline" size={16} color={MUTED} />
           </Pressable>
         </View>
       )}
@@ -352,13 +386,6 @@ function friendlyErrorMessage(err: unknown): string {
   }
   return raw || "Couldn't get a reply. Check your connection and try again.";
 }
-
-const BG = "#000000";
-const SURFACE = "#1c1c1e";
-const BORDER = "#2c2c2e";
-const TEXT = "#ececec";
-const MUTED = "#8e8e93";
-const ACCENT = "#2563eb";
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: BG },
@@ -388,7 +415,7 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: "row", gap: 4, marginTop: 4 },
   iconButton: { padding: 4 },
   thinking: { marginTop: 4, alignSelf: "flex-start" },
-  error: { color: "#ff453a", paddingHorizontal: 16, paddingBottom: 4, fontSize: 13 },
+  error: { color: ERROR, paddingHorizontal: 16, paddingBottom: 4, fontSize: 13 },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
