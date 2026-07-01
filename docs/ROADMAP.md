@@ -66,6 +66,8 @@ The actual product the user sees.
 - **7.5 Lore book viewer** — Browse vector store; tag editor.
 - **7.6 Reflection inbox** — Surface new `REFLECTION` assets; accept/dismiss with effect application.
 
+**Known tech debt:** `@expo/vector-icons` (used by `ChatScreen.tsx`'s message-action icons) is deprecated as of Expo SDK 56 in favor of the scoped `@react-native-vector-icons/*` packages. Still functions today — the CI Android build succeeds with it — but deliberately not migrated yet, since swapping icon libraries for a non-urgent deprecation carries real regression risk for no immediate benefit. Revisit before Expo actually removes it from a future SDK.
+
 ## Tier 8 — User-Requested Extras 🟡 / 📋
 
 From the original kickoff message.
