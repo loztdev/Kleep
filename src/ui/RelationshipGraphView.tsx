@@ -12,7 +12,7 @@
  * bundle, since a graph node can have many edges at once.
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   type LayoutChangeEvent,
   Pressable,
@@ -96,18 +96,22 @@ export function RelationshipGraphView({ nodes, edges }: RelationshipGraphViewPro
               if (!pos) return null;
               const isSelected = node.id === selectedId;
               const dimmed = selectedId !== null && !isSelected && !connectedNodeIds.has(node.id);
+              const onPress = () => setSelectedId((cur) => (cur === node.id ? null : node.id));
               return (
-                <Circle
-                  key={node.id}
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={isSelected ? NODE_RADIUS + 3 : NODE_RADIUS}
-                  fill={colorForType(node.entityType)}
-                  opacity={dimmed ? 0.3 : 1}
-                  stroke={isSelected ? "#fff" : "none"}
-                  strokeWidth={isSelected ? 2 : 0}
-                  onPress={() => setSelectedId((cur) => (cur === node.id ? null : node.id))}
-                />
+                <Fragment key={node.id}>
+                  {/* Invisible larger hit target — the visible node is well under the ~44pt touch-target guideline. */}
+                  <Circle cx={pos.x} cy={pos.y} r={NODE_RADIUS + 12} fill="transparent" onPress={onPress} />
+                  <Circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={isSelected ? NODE_RADIUS + 3 : NODE_RADIUS}
+                    fill={colorForType(node.entityType)}
+                    opacity={dimmed ? 0.3 : 1}
+                    stroke={isSelected ? "#fff" : "none"}
+                    strokeWidth={isSelected ? 2 : 0}
+                    onPress={onPress}
+                  />
+                </Fragment>
               );
             })}
           </Svg>
