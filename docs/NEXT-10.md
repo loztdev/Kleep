@@ -301,6 +301,26 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 
 ---
 
+## 16. Memory browser: relationship graph visualizer (phase 2) ⚡ (not in the original top-10, added by request)
+
+**Why:** #15 shipped cards-first per the explicit request ("start with cards, add graph after"); this is the "add graph after" half.
+
+**Research finding that shaped the design:** there's no relationship data anywhere in the schema — `WorldBibleAttribute.value` is always a plain scalar (`z.string()` in the LLM extraction schema), never a reference to another entity's id/name (no `spouse`/`friend_of`-style field pointing at another entity). The only real signal for "these two entities are connected" is co-occurrence: `entity_ids` on a FACT/RULE/SUMMARY/REFLECTION/OPINION asset or a Lore snippet already lists which entities that asset mentions together (e.g. the pattern extractor's "X is at Y" fact sets `entity_ids: [name, place]`) — this mirrors precedent already in the codebase (`stubReflector.sharesAnyEntity()` treats two assets as related when their `entity_ids` intersect).
+
+**Built:**
+- `react-native-svg@15.15.5` (new dependency) — nothing in the app drew arbitrary shapes/lines before this; installed directly via npm since the Expo compatibility-check endpoint (`npx expo install`) is blocked by this sandbox's proxy, but the plain npm registry isn't — picked the latest version, verified compatible by confirming the web bundle still builds afterward (see below).
+- `src/ui/relationshipGraph.ts` (new, pure logic, no RN imports) — `buildRelationshipGraph(structured, vector)` builds nodes from every `WorldBibleEntry` and edges from co-occurrence: for each qualifying asset, every pair of its `entity_ids` that both correspond to a known entity gets an edge (multiple co-occurring assets between the same pair collapse into one edge with several `reasons`, not duplicates); entity_ids referencing unknown/not-yet-promoted entities are silently dropped rather than creating "ghost" nodes. `layoutNodesInCircle(nodes, size)` is a deterministic circular layout — no force-directed/physics library is a dependency, so this is a simple even-spacing placement, not a real graph layout algorithm; revisit if the World Bible ever grows large enough that a circle stops being readable.
+- `src/ui/RelationshipGraphView.tsx` (new) — presentational SVG canvas: `Circle`s for nodes (colored by a hash of `entity_type` onto a small fixed categorical palette, since `theme.ts` only has one dark palette, not a categorical one), `Line`s for edges. Tapping a node highlights its edges/dims everything else and opens a small info card below the canvas listing what it's connected to and the co-occurring asset content (the "why"); isolated entities with no known connections still render as their own node, labeled as having none.
+- `src/ui/MemoryBrowserScreen.tsx` — added a third "Graph" tab alongside "World Bible"/"Lore" (no new app-level navigation state needed; reuses the same `structured`/`vector` already fetched for the other two tabs).
+
+**Done when:**
+- `buildRelationshipGraph()`/`layoutNodesInCircle()` behavior verified — new `src/ui/__tests__/relationshipGraph.test.ts` (9 tests): node-per-entity with no co-occurrence, single co-occurring fact creates one edge, repeated co-occurrence across multiple facts dedupes into one edge with multiple reasons, unknown entity_ids are ignored, lore snippets contribute edges too, 3+ co-occurring entities connect every pair, and circular layout math (empty/single/multiple nodes) ✅
+- The screen renders and node-tap interaction works — **not verified in a live RN session** (no simulator/device in this sandbox), same verification depth as #15; verified instead that `tsc`/the full Jest suite (404 tests) pass and that the web bundle still builds and serves cleanly with the new `react-native-svg` dependency (HTTP 200, no unresolved-import errors), confirming it doesn't repeat #15's web-bundle break.
+
+**Depends on:** #15 (Memory browser cards, `MemoryBrowserScreen.tsx`/`StructuredStore`/`VectorStore`).
+
+---
+
 ## Suggested execution order
 
 The dependency graph collapses into roughly three waves:

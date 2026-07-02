@@ -17,6 +17,8 @@ import { explain, explainAttribute, type ProvenanceBundle } from "../explain";
 import { WhyPanel } from "../explain/WhyPanel";
 import { MemoryKind, type LoreSnippet, type WorldBibleEntry } from "../schema";
 import type { StructuredStore, VectorStore } from "../storage";
+import { buildRelationshipGraph } from "./relationshipGraph";
+import { RelationshipGraphView } from "./RelationshipGraphView";
 import { ACCENT, BG, BORDER, MUTED, SURFACE, TEXT } from "./theme";
 
 interface MemoryBrowserScreenProps {
@@ -25,7 +27,7 @@ interface MemoryBrowserScreenProps {
   onClose: () => void;
 }
 
-type Tab = "entities" | "lore";
+type Tab = "entities" | "lore" | "graph";
 
 export function MemoryBrowserScreen({ structured, vector, onClose }: MemoryBrowserScreenProps) {
   const [tab, setTab] = useState<Tab>("entities");
@@ -34,6 +36,10 @@ export function MemoryBrowserScreen({ structured, vector, onClose }: MemoryBrows
     [structured],
   );
   const lore = useMemo(() => vector.list(), [vector]);
+  const graph = useMemo(
+    () => buildRelationshipGraph(structured, vector),
+    [structured, vector],
+  );
 
   const [selectedEntity, setSelectedEntity] = useState<WorldBibleEntry | null>(null);
   const [selectedLore, setSelectedLore] = useState<LoreSnippet | null>(null);
@@ -59,9 +65,14 @@ export function MemoryBrowserScreen({ structured, vector, onClose }: MemoryBrows
         <Pressable style={[styles.tab, tab === "lore" && styles.tabActive]} onPress={() => setTab("lore")}>
           <Text style={[styles.tabText, tab === "lore" && styles.tabTextActive]}>Lore ({lore.length})</Text>
         </Pressable>
+        <Pressable style={[styles.tab, tab === "graph" && styles.tabActive]} onPress={() => setTab("graph")}>
+          <Text style={[styles.tabText, tab === "graph" && styles.tabTextActive]}>Graph</Text>
+        </Pressable>
       </View>
 
-      {tab === "entities" ? (
+      {tab === "graph" ? (
+        <RelationshipGraphView nodes={graph.nodes} edges={graph.edges} />
+      ) : tab === "entities" ? (
         entities.length === 0 ? (
           <Text style={styles.empty}>
             No entities yet — people, places, and things Kleep learns about will show up here.
