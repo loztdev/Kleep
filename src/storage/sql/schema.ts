@@ -87,6 +87,20 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns(session_id, turn_index);
     `,
   },
+  {
+    id: "0002_prompts",
+    sql: `
+      CREATE TABLE IF NOT EXISTS saved_prompts (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      ALTER TABLE chat_sessions ADD COLUMN system_prompt TEXT;
+    `,
+  },
 ];
 
 /** Create the migrations table and apply any migration not yet recorded, in order. */

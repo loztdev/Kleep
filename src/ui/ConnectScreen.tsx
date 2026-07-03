@@ -9,11 +9,19 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
 import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
+import type { PromptStore } from "../storage";
 import { ModelPickerModal } from "./ModelPickerModal";
+import { PromptPickerModal } from "./PromptPickerModal";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ConnectScreenProps {
-  onConnected: (provider: LlmProvider, kind: LlmProviderKind, model?: string) => void;
+  promptStore: PromptStore;
+  onConnected: (
+    provider: LlmProvider,
+    kind: LlmProviderKind,
+    model?: string,
+    defaultSystemPrompt?: string,
+  ) => void;
 }
 
 const PROVIDERS: Array<{ kind: LlmProviderKind; label: string; keyHint: string }> = [
@@ -21,13 +29,15 @@ const PROVIDERS: Array<{ kind: LlmProviderKind; label: string; keyHint: string }
   { kind: "claude", label: "Claude (Anthropic)", keyHint: "sk-ant-..." },
 ];
 
-export function ConnectScreen({ onConnected }: ConnectScreenProps) {
+export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) {
   const [kind, setKind] = useState<LlmProviderKind>("openrouter");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [promptPickerVisible, setPromptPickerVisible] = useState(false);
 
   const handleConnect = async () => {
     const trimmedKey = apiKey.trim();
@@ -39,10 +49,11 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
     setConnecting(true);
     try {
       const trimmedModel = model.trim();
+      const trimmedSystemPrompt = systemPrompt.trim();
       const provider = buildLlmProvider({ kind, apiKey: trimmedKey, ...(trimmedModel ? { model: trimmedModel } : {}) });
       await saveApiKey(kind, trimmedKey);
       await saveActiveProvider(kind);
-      onConnected(provider, kind, trimmedModel || undefined);
+      onConnected(provider, kind, trimmedModel || undefined, trimmedSystemPrompt || undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect — check the key and try again.");
     } finally {
@@ -103,6 +114,27 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
         </Pressable>
       </View>
 
+      <View style={styles.modelRow}>
+        <TextInput
+          style={[styles.input, styles.modelInput]}
+          placeholder="Default system prompt (optional)"
+          placeholderTextColor={MUTED}
+          value={systemPrompt}
+          onChangeText={setSystemPrompt}
+          autoCapitalize="none"
+          editable={!connecting}
+        />
+        <Pressable
+          style={styles.browseButton}
+          onPress={() => setPromptPickerVisible(true)}
+          disabled={connecting}
+          accessibilityRole="button"
+          accessibilityLabel="Browse system prompts"
+        >
+          <Text style={styles.browseButtonText}>Browse</Text>
+        </Pressable>
+      </View>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Pressable style={styles.connectButton} onPress={handleConnect} disabled={connecting}>
@@ -115,6 +147,12 @@ export function ConnectScreen({ onConnected }: ConnectScreenProps) {
         apiKey={apiKey}
         onSelect={setModel}
         onClose={() => setPickerVisible(false)}
+      />
+      <PromptPickerModal
+        visible={promptPickerVisible}
+        promptStore={promptStore}
+        onSelect={setSystemPrompt}
+        onClose={() => setPromptPickerVisible(false)}
       />
     </View>
   );

@@ -42,10 +42,11 @@ import {
 import { ConversationBuffer, TurnRole, type Turn } from "../conversation";
 import type { LlmProvider, LlmProviderKind } from "../llm";
 import { newId } from "../schema";
-import type { ChatSessionStore, StructuredStore, VectorStore } from "../storage";
+import type { ChatSessionStore, PromptStore, StructuredStore, VectorStore } from "../storage";
 import { generateReply } from "./chatReply";
 import { friendlyErrorMessage } from "./friendlyError";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
+import { PromptPickerModal } from "./PromptPickerModal";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ChatScreenProps {
@@ -54,6 +55,9 @@ interface ChatScreenProps {
   model?: string;
   structured: StructuredStore;
   vector: VectorStore;
+  promptStore: PromptStore;
+  /** Seeds a brand-new/ephemeral chat's system prompt; ignored once a session has its own stored value. */
+  defaultSystemPrompt?: string;
   /** `null` on web — no persistence there, see `openKleepDatabase.ts`. */
   sessionId: string | null;
   sessionStore: ChatSessionStore | null;
@@ -69,13 +73,15 @@ export function ChatScreen({
   model,
   structured,
   vector,
+  promptStore,
+  defaultSystemPrompt,
   sessionId,
   sessionStore,
   onDisconnect,
   onOpenMemory,
   onBack,
 }: ChatScreenProps) {
-  const { engine, providerMismatch } = useMemo(() => {
+  const { engine, providerMismatch, initialSystemPrompt } = useMemo(() => {
     const buffer =
       sessionId && sessionStore
         ? (() => {
@@ -93,17 +99,22 @@ export function ChatScreen({
     // shows the old metadata — flag it and correct the stored metadata to
     // match what's actually happening from here on.
     let mismatch = false;
+    let systemPrompt = defaultSystemPrompt;
     if (sessionId && sessionStore) {
       const meta = sessionStore.getSession(sessionId);
-      if (meta && (meta.providerKind !== providerKind || meta.model !== model)) {
-        mismatch = true;
-        sessionStore.updateProviderMeta(sessionId, providerKind, model);
+      if (meta) {
+        systemPrompt = meta.systemPrompt;
+        if (meta.providerKind !== providerKind || meta.model !== model) {
+          mismatch = true;
+          sessionStore.updateProviderMeta(sessionId, providerKind, model);
+        }
       }
     }
 
     return {
       engine: buildMemoryEngine(provider, { structured, vector, buffer }),
       providerMismatch: mismatch,
+      initialSystemPrompt: systemPrompt,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, structured, vector, sessionId, sessionStore]);
@@ -113,6 +124,8 @@ export function ChatScreen({
   const [error, setError] = useState<string | null>(null);
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [activeSystemPrompt, setActiveSystemPrompt] = useState<string | undefined>(initialSystemPrompt);
+  const [promptPickerVisible, setPromptPickerVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   // `sending` (state) lags a render behind a tap, so a fast double-tap can
   // slip through before any button disables — this ref guard is synchronous.
@@ -129,6 +142,11 @@ export function ChatScreen({
   };
   const persistReplaceFrom = (turnId: string, newTurns: readonly Turn[]) => {
     if (sessionId && sessionStore) sessionStore.replaceFrom(sessionId, turnId, newTurns, Date.now());
+  };
+
+  const handleSelectSystemPrompt = (content: string) => {
+    setActiveSystemPrompt(content);
+    if (sessionId && sessionStore) sessionStore.updateSystemPrompt(sessionId, content, Date.now());
   };
 
   const tickMemoryPipeline = async () => {
@@ -161,7 +179,7 @@ export function ChatScreen({
       setMessages(engine.buffer.all().slice());
       setInput("");
 
-      const replyText = await generateReply(provider, engine.buffer.liveTurns());
+      const replyText = await generateReply(provider, engine.buffer.liveTurns(), activeSystemPrompt);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -197,7 +215,7 @@ export function ChatScreen({
       // mirror it into `engine.buffer` once that succeeds — a failure at
       // any step leaves the existing reply in place with nothing to roll
       // back, instead of the buffer running ahead of what's saved.
-      const replyText = await generateReply(provider, contextTurns);
+      const replyText = await generateReply(provider, contextTurns, activeSystemPrompt);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -242,7 +260,7 @@ export function ChatScreen({
 
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
-      const replyText = await generateReply(provider, [...priorTurns, editedTurn]);
+      const replyText = await generateReply(provider, [...priorTurns, editedTurn], activeSystemPrompt);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -291,6 +309,14 @@ export function ChatScreen({
           <Text style={styles.headerTitle}>Kleep</Text>
         </View>
         <View style={styles.headerRight}>
+          <Pressable
+            onPress={() => setPromptPickerVisible(true)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Choose system prompt"
+          >
+            <Ionicons name="chatbox-ellipses-outline" size={20} color={MUTED} />
+          </Pressable>
           <Pressable
             onPress={onOpenMemory}
             hitSlop={8}
@@ -362,6 +388,13 @@ export function ChatScreen({
           <Text style={styles.sendButtonText}>Send</Text>
         </Pressable>
       </View>
+
+      <PromptPickerModal
+        visible={promptPickerVisible}
+        promptStore={promptStore}
+        onSelect={handleSelectSystemPrompt}
+        onClose={() => setPromptPickerVisible(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
