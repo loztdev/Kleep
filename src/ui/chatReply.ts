@@ -32,6 +32,10 @@ export async function generateReply(
     messages,
     system: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     maxTokens: 500,
+    // Automatic prompt caching: `messages` grows every turn, so once the
+    // conversation crosses the model's minimum cacheable token count,
+    // later turns get cheaper, faster reprocessing of the earlier history.
+    cache: true,
   });
   return result.text;
 }

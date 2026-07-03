@@ -34,6 +34,22 @@ describe("CostTracker", () => {
     expect(entry.cacheCreationInputTokens).toBe(50);
   });
 
+  it("prices cache writes at 1.25x and cache reads at 0.1x the base input rate", () => {
+    const tracker = new CostTracker();
+    const entry = tracker.record(
+      "claude-opus-4-8",
+      usage({
+        input_tokens: 10,
+        output_tokens: 0,
+        cache_creation_input_tokens: 1000,
+        cache_read_input_tokens: 2000,
+      }),
+    );
+    // 10 uncached input @ $5/MTok + 1000 cache-write @ $5*1.25/MTok + 2000 cache-read @ $5*0.1/MTok
+    const expected = (10 * 5 + 1000 * 5 * 1.25 + 2000 * 5 * 0.1) / 1_000_000;
+    expect(entry.costUsd).toBeCloseTo(expected);
+  });
+
   it("accumulates history and a running total", () => {
     const tracker = new CostTracker();
     tracker.record("claude-haiku-4-5", usage());

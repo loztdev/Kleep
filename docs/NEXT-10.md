@@ -15,7 +15,8 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 - Auth via Expo SecureStore — `src/claude/secureKeyStore.ts` (not in the `src/claude` barrel; it touches a native module, so import it directly from app code)
 - Retry with jitter on 429 / 529 / transient 5xx — `src/claude/retry.ts`
 - Streaming support (for chat — Tier 7) — `client.streamMessage()`
-- Token + cost accounting per call, exposed for the settings dashboard — `src/claude/costTracker.ts`
+- Token + cost accounting per call, exposed for the settings dashboard — `src/claude/costTracker.ts` (prices cache-write/cache-read tokens at their real 1.25×/0.1× multipliers, not $0)
+- Prompt caching (new, by request) — `SendMessageOptions.cache` opts a call into Anthropic's automatic `cache_control`, threaded through `LlmSendOptions.cache` for provider-agnostic callers; only `chatReply.ts` sets it, since it's the one call site whose prompt reliably grows past a model's minimum cacheable token count
 - Structured-output helper (Zod schema → tool-call definition) — `src/claude/zodToJsonSchema.ts` + `client.structured()`
 - Fixture-record/replay harness so Jest tests stay deterministic — `src/claude/fixtures.ts` (`FixtureTransport`)
 

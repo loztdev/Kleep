@@ -51,6 +51,14 @@ export interface SendMessageOptions {
   maxTokens?: number;
   tools?: readonly Anthropic.Tool[];
   toolChoice?: Anthropic.ToolChoice;
+  /**
+   * Request automatic (top-level) prompt caching — see `ClaudeRequest.cache_control`.
+   * Only worth setting on calls whose `messages` will grow past the target
+   * model's minimum cacheable token count (e.g. multi-turn chat); short,
+   * single-shot prompts (extraction, summarization) won't cross that floor
+   * and gain nothing from it.
+   */
+  cache?: boolean;
 }
 
 /** Options for `ClaudeClient.structured` — a single named tool the model is forced to call. */
@@ -234,6 +242,7 @@ export class ClaudeClient {
       ...(opts.system !== undefined ? { system: opts.system } : {}),
       ...(opts.tools !== undefined ? { tools: [...opts.tools] } : {}),
       ...(opts.toolChoice !== undefined ? { tool_choice: opts.toolChoice } : {}),
+      ...(opts.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
     };
   }
 }

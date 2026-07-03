@@ -61,12 +61,14 @@ function toClaudeSendOptions(opts: LlmSendOptions): {
   system?: string;
   model?: string;
   maxTokens?: number;
+  cache?: boolean;
 } {
   return {
     messages: opts.messages.map(toClaudeMessageParam),
     ...(opts.system !== undefined ? { system: opts.system } : {}),
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+    ...(opts.cache !== undefined ? { cache: opts.cache } : {}),
   };
 }
 
