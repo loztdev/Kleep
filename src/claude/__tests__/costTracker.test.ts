@@ -48,6 +48,8 @@ describe("CostTracker", () => {
     // 10 uncached input @ $5/MTok + 1000 cache-write @ $5*1.25/MTok + 2000 cache-read @ $5*0.1/MTok
     const expected = (10 * 5 + 1000 * 5 * 1.25 + 2000 * 5 * 0.1) / 1_000_000;
     expect(entry.costUsd).toBeCloseTo(expected);
+    expect(entry.cacheCreationInputTokens).toBe(1000);
+    expect(entry.cacheReadInputTokens).toBe(2000);
   });
 
   it("accumulates history and a running total", () => {
