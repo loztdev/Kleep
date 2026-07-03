@@ -3,9 +3,27 @@
  * https://openrouter.ai/docs/api-reference/chat-completion
  */
 
+/**
+ * Anthropic-style cache breakpoint, passed straight through by OpenRouter to
+ * Claude models — same shape and same `5m`/`1h` TTL limit as calling
+ * Anthropic directly. See `src/llm/types.ts`'s `CacheTtl` doc.
+ */
+export interface OpenRouterCacheControl {
+  type: "ephemeral";
+  ttl?: "5m" | "1h";
+}
+
+/** One block of a content-array message — the form required to attach `cache_control` to a specific block. */
+export interface OpenRouterTextContentBlock {
+  type: "text";
+  text: string;
+  cache_control?: OpenRouterCacheControl;
+}
+
 export interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** Plain string for the common case; a content-block array only when a block needs `cache_control`. */
+  content: string | OpenRouterTextContentBlock[];
 }
 
 /** JSON-schema-shaped function tool, OpenAI function-calling convention. */
@@ -78,10 +96,21 @@ export interface OpenRouterMessageStream extends AsyncIterable<OpenRouterStreamC
   finalMessage(): Promise<OpenRouterResponse>;
 }
 
+/**
+ * Transport-level (not request-body) knobs — currently just OpenRouter's
+ * *response* cache, an exact-request memoization layer at OpenRouter itself
+ * (unrelated to `cache_control` prompt caching above), toggled via headers
+ * rather than a body field.
+ */
+export interface OpenRouterRequestOptions {
+  /** Sets `X-OpenRouter-Cache: true` + `X-OpenRouter-Cache-TTL`. Seconds, 1–86400. Omit to leave response caching off. */
+  responseCacheTtlSeconds?: number;
+}
+
 /** Seam between `OpenRouterClient` and the actual transport (real HTTP vs. fixture replay). */
 export interface OpenRouterTransport {
-  send(request: OpenRouterRequest): Promise<OpenRouterResponse>;
-  stream(request: OpenRouterRequest): OpenRouterMessageStream;
+  send(request: OpenRouterRequest, opts?: OpenRouterRequestOptions): Promise<OpenRouterResponse>;
+  stream(request: OpenRouterRequest, opts?: OpenRouterRequestOptions): OpenRouterMessageStream;
 }
 
 /** Thrown for any non-2xx HTTP response from the OpenRouter API. */

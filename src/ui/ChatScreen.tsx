@@ -43,7 +43,7 @@ import { ConversationBuffer, TurnRole, type Turn } from "../conversation";
 import type { LlmProvider, LlmProviderKind } from "../llm";
 import { newId } from "../schema";
 import type { ChatSessionStore, PromptStore, StructuredStore, VectorStore } from "../storage";
-import { generateReply } from "./chatReply";
+import { DEFAULT_CACHE_SETTINGS, generateReply, type CacheSettings } from "./chatReply";
 import { friendlyErrorMessage } from "./friendlyError";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
 import { PromptPickerModal } from "./PromptPickerModal";
@@ -58,6 +58,8 @@ interface ChatScreenProps {
   promptStore: PromptStore;
   /** Seeds a brand-new/ephemeral chat's system prompt; ignored once a session has its own stored value. */
   defaultSystemPrompt?: string;
+  /** App-wide caching preference set on `ConnectScreen`; defaults to real prompt caching on, response caching off. */
+  cacheSettings?: CacheSettings;
   /** `null` on web — no persistence there, see `openKleepDatabase.ts`. */
   sessionId: string | null;
   sessionStore: ChatSessionStore | null;
@@ -75,6 +77,7 @@ export function ChatScreen({
   vector,
   promptStore,
   defaultSystemPrompt,
+  cacheSettings = DEFAULT_CACHE_SETTINGS,
   sessionId,
   sessionStore,
   onDisconnect,
@@ -184,7 +187,7 @@ export function ChatScreen({
       setMessages(engine.buffer.all().slice());
       setInput("");
 
-      const replyText = await generateReply(provider, engine.buffer.liveTurns(), activeSystemPrompt);
+      const replyText = await generateReply(provider, engine.buffer.liveTurns(), activeSystemPrompt, cacheSettings);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -220,7 +223,7 @@ export function ChatScreen({
       // mirror it into `engine.buffer` once that succeeds — a failure at
       // any step leaves the existing reply in place with nothing to roll
       // back, instead of the buffer running ahead of what's saved.
-      const replyText = await generateReply(provider, contextTurns, activeSystemPrompt);
+      const replyText = await generateReply(provider, contextTurns, activeSystemPrompt, cacheSettings);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -265,7 +268,7 @@ export function ChatScreen({
 
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
-      const replyText = await generateReply(provider, [...priorTurns, editedTurn], activeSystemPrompt);
+      const replyText = await generateReply(provider, [...priorTurns, editedTurn], activeSystemPrompt, cacheSettings);
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,

@@ -62,6 +62,30 @@ describe("RealOpenRouterTransport.send", () => {
     expect(response.choices[0]?.message.content).toBe("hi there");
   });
 
+  it("omits response-cache headers by default, and sets them when responseCacheTtlSeconds is passed", async () => {
+    let capturedInit: RequestInit | undefined;
+    global.fetch = jest.fn(async (_url: string | URL, init?: RequestInit) => {
+      capturedInit = init;
+      return jsonResponse(200, {
+        id: "gen_1",
+        model: "openai/gpt-4o-mini",
+        choices: [{ index: 0, message: { role: "assistant", content: "hi" }, finish_reason: "stop" }],
+      });
+    }) as unknown as typeof fetch;
+
+    const transport = new RealOpenRouterTransport({ apiKey: "sk-or-test" });
+
+    await transport.send(request);
+    let headers = capturedInit?.headers as Record<string, string>;
+    expect(headers["X-OpenRouter-Cache"]).toBeUndefined();
+    expect(headers["X-OpenRouter-Cache-TTL"]).toBeUndefined();
+
+    await transport.send(request, { responseCacheTtlSeconds: 3600 });
+    headers = capturedInit?.headers as Record<string, string>;
+    expect(headers["X-OpenRouter-Cache"]).toBe("true");
+    expect(headers["X-OpenRouter-Cache-TTL"]).toBe("3600");
+  });
+
   it("respects a custom baseURL", async () => {
     let capturedUrl = "";
     global.fetch = jest.fn(async (url: string | URL) => {

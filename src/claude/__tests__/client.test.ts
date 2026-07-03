@@ -91,6 +91,17 @@ describe("ClaudeClient.sendMessage", () => {
     expect(transport.sendCalls[1]!.cache_control).toEqual({ type: "ephemeral" });
   });
 
+  it("passes cacheTtl through to cache_control.ttl, omitting it (Anthropic's 5m default) when unset", async () => {
+    const transport = new StubTransport(async () => textMessage("hello"));
+    const client = new ClaudeClient({ transport });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], cache: true });
+    expect(transport.sendCalls[0]!.cache_control).toEqual({ type: "ephemeral" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], cache: true, cacheTtl: "1h" });
+    expect(transport.sendCalls[1]!.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+  });
+
   it("retries on 429 with backoff, then succeeds", async () => {
     let attempts = 0;
     const transport = new StubTransport(async () => {

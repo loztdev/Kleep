@@ -16,6 +16,7 @@
 import type {
   OpenRouterMessageStream,
   OpenRouterRequest,
+  OpenRouterRequestOptions,
   OpenRouterResponse,
   OpenRouterStreamChunk,
   OpenRouterTransport,
@@ -54,13 +55,13 @@ export class RealOpenRouterTransport implements OpenRouterTransport {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async send(request: OpenRouterRequest): Promise<OpenRouterResponse> {
+  async send(request: OpenRouterRequest, opts?: OpenRouterRequestOptions): Promise<OpenRouterResponse> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const res = await fetch(this.url(), {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(opts),
         body: JSON.stringify({ ...request, stream: false, usage: { include: true } }),
         signal: controller.signal,
       });
@@ -73,9 +74,9 @@ export class RealOpenRouterTransport implements OpenRouterTransport {
     }
   }
 
-  stream(request: OpenRouterRequest): OpenRouterMessageStream {
+  stream(request: OpenRouterRequest, opts?: OpenRouterRequestOptions): OpenRouterMessageStream {
     const url = this.url();
-    const headers = this.headers();
+    const headers = this.headers(opts);
     const body = JSON.stringify({ ...request, stream: true, usage: { include: true } });
     const timeoutMs = this.timeoutMs;
     const controller = new AbortController();
@@ -170,12 +171,15 @@ export class RealOpenRouterTransport implements OpenRouterTransport {
     return `${this.opts.baseURL ?? DEFAULT_BASE_URL}/chat/completions`;
   }
 
-  private headers(): Record<string, string> {
+  private headers(opts?: OpenRouterRequestOptions): Record<string, string> {
     return {
       Authorization: `Bearer ${this.opts.apiKey}`,
       "Content-Type": "application/json",
       ...(this.opts.httpReferer ? { "HTTP-Referer": this.opts.httpReferer } : {}),
       ...(this.opts.appTitle ? { "X-Title": this.opts.appTitle } : {}),
+      ...(opts?.responseCacheTtlSeconds !== undefined
+        ? { "X-OpenRouter-Cache": "true", "X-OpenRouter-Cache-TTL": String(opts.responseCacheTtlSeconds) }
+        : {}),
     };
   }
 }

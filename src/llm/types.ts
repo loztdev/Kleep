@@ -18,6 +18,14 @@ export interface LlmMessage {
   content: string;
 }
 
+/**
+ * Cache breakpoint lifetime for `cache`. This is Anthropic's own limit
+ * (`5m` or `1h`, nothing in between or beyond) — OpenRouter passes Claude
+ * requests straight through to Anthropic unchanged, so the same two values
+ * are all either path supports. Omitting it defaults to `5m`.
+ */
+export type CacheTtl = "5m" | "1h";
+
 /** Options shared by every message-sending call. */
 export interface LlmSendOptions {
   messages: readonly LlmMessage[];
@@ -25,13 +33,27 @@ export interface LlmSendOptions {
   model?: string;
   maxTokens?: number;
   /**
-   * Request prompt caching, where the underlying provider supports it (currently
-   * Claude's automatic/top-level `cache_control`). Providers without a caching
-   * concept (e.g. OpenRouter) ignore this field. Only worth setting on calls
-   * whose `messages` will grow past the target model's minimum cacheable token
+   * Request prompt caching (Anthropic's `cache_control`), where the
+   * underlying provider/model supports it — Claude directly, or Claude
+   * models routed through OpenRouter (passed through to the same
+   * mechanism). Providers with no such concept (e.g. non-Claude models via
+   * OpenRouter) just ignore the field. Only worth setting on calls whose
+   * `messages` will grow past the target model's minimum cacheable token
    * count — see `SendMessageOptions.cache` in `src/claude/client.ts`.
    */
   cache?: boolean;
+  /** TTL for `cache`'s breakpoint. Ignored if `cache` is falsy. Defaults to `5m`. */
+  cacheTtl?: CacheTtl;
+  /**
+   * OpenRouter-only: opt into OpenRouter's *response* cache — an exact-request
+   * memoization layer at OpenRouter itself, unrelated to provider-side prompt
+   * caching above. A hit only happens when a later call is byte-identical to
+   * this one (same messages, same everything), so it rarely fires mid-chat;
+   * it mainly helps with accidental duplicate calls (e.g. a double-tapped
+   * regenerate). Value is the cache lifetime in seconds (1–86400). Ignored by
+   * `ClaudeProvider`.
+   */
+  responseCacheTtlSeconds?: number;
 }
 
 /** Token usage for one call, normalized across providers. */
