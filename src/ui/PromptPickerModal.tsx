@@ -47,7 +47,6 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
   const [libraryEntries, setLibraryEntries] = useState<PromptLibraryEntry[] | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
-  const [savedFromLibrary, setSavedFromLibrary] = useState<Set<string>>(new Set());
 
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -131,9 +130,16 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
     refresh();
   };
 
+  // Keyed by title+content (not id — library entries and saved prompts have
+  // unrelated id schemes) so a library row's "saved" checkmark reflects the
+  // *current* saved list — including after the saved copy is deleted or
+  // edited elsewhere — instead of an ever-growing, never-shrinking set.
+  const promptKey = (title: string, content: string) => `${title}::${content}`;
+  const savedPromptKeys = new Set(savedPrompts.map((p) => promptKey(p.title, p.content)));
+
   const saveLibraryEntry = (entry: PromptLibraryEntry) => {
+    if (savedPromptKeys.has(promptKey(entry.title, entry.content))) return;
     promptStore.create({ id: newId(), title: entry.title, content: entry.content, now: Date.now() });
-    setSavedFromLibrary((prev) => new Set(prev).add(entry.id));
     refresh();
   };
 
@@ -305,38 +311,41 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.list}
                 ListEmptyComponent={<Text style={styles.empty}>No prompts match "{query}".</Text>}
-                renderItem={({ item }) => (
-                  <View style={styles.row}>
-                    <Pressable
-                      style={styles.rowContent}
-                      onPress={() => {
-                        onSelect(item.content);
-                        onClose();
-                      }}
-                    >
-                      <Text style={styles.rowTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.rowBody} numberOfLines={2}>
-                        {item.content}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => saveLibraryEntry(item)}
-                      style={styles.iconButton}
-                      hitSlop={8}
-                      disabled={savedFromLibrary.has(item.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={savedFromLibrary.has(item.id) ? "Already saved" : "Save to my prompts"}
-                    >
-                      <Ionicons
-                        name={savedFromLibrary.has(item.id) ? "checkmark-outline" : "bookmark-outline"}
-                        size={16}
-                        color={savedFromLibrary.has(item.id) ? ACCENT : MUTED}
-                      />
-                    </Pressable>
-                  </View>
-                )}
+                renderItem={({ item }) => {
+                  const alreadySaved = savedPromptKeys.has(promptKey(item.title, item.content));
+                  return (
+                    <View style={styles.row}>
+                      <Pressable
+                        style={styles.rowContent}
+                        onPress={() => {
+                          onSelect(item.content);
+                          onClose();
+                        }}
+                      >
+                        <Text style={styles.rowTitle} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={styles.rowBody} numberOfLines={2}>
+                          {item.content}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => saveLibraryEntry(item)}
+                        style={styles.iconButton}
+                        hitSlop={8}
+                        disabled={alreadySaved}
+                        accessibilityRole="button"
+                        accessibilityLabel={alreadySaved ? "Already saved" : "Save to my prompts"}
+                      >
+                        <Ionicons
+                          name={alreadySaved ? "checkmark-outline" : "bookmark-outline"}
+                          size={16}
+                          color={alreadySaved ? ACCENT : MUTED}
+                        />
+                      </Pressable>
+                    </View>
+                  );
+                }}
               />
             )}
           </>

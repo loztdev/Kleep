@@ -19,6 +19,7 @@ export async function withFetchTimeout<T>(
   external?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
+  if (external?.aborted) controller.abort();
   const onExternalAbort = () => controller.abort();
   external?.addEventListener("abort", onExternalAbort);
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

@@ -22,7 +22,11 @@ export class InMemoryPromptStore implements PromptStore {
   }
 
   list(): SavedPrompt[] {
-    return Array.from(this.byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+    // `id` tiebreaker keeps ordering deterministic (and consistent with
+    // `SqlitePromptStore`) when two prompts share an `updatedAt` millisecond.
+    return Array.from(this.byId.values()).sort(
+      (a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id),
+    );
   }
 
   get(id: string): SavedPrompt | undefined {

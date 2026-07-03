@@ -25,4 +25,15 @@ describe("withFetchTimeout", () => {
     await promise;
     expect(observedAborted).toBe(true);
   });
+
+  it("passes an already-aborted signal to fn when external is aborted before the call", async () => {
+    const external = new AbortController();
+    external.abort();
+    let observedAborted = false;
+    await withFetchTimeout(async (signal) => {
+      observedAborted = signal.aborted;
+      return "done";
+    }, external.signal);
+    expect(observedAborted).toBe(true);
+  });
 });

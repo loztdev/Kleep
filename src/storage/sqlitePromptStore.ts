@@ -36,8 +36,10 @@ export class SqlitePromptStore implements PromptStore {
   }
 
   list(): SavedPrompt[] {
+    // `id` tiebreaker keeps ordering deterministic (and consistent with
+    // `InMemoryPromptStore`) when two prompts share an `updated_at` millisecond.
     const rows = this.db.getAllSync<Row>(
-      "SELECT * FROM saved_prompts ORDER BY updated_at DESC",
+      "SELECT * FROM saved_prompts ORDER BY updated_at DESC, id ASC",
       [],
     );
     return rows.map(toSavedPrompt);

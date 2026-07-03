@@ -53,6 +53,20 @@ describe("parsePromptLibraryCsv", () => {
     expect(parsePromptLibraryCsv("foo,bar\n1,2\n")).toEqual([]);
   });
 
+  it("tolerates stray whitespace in header cells", () => {
+    const csv = ' act ,prompt\nPirate,"Talk like a pirate."\n';
+    expect(parsePromptLibraryCsv(csv)).toEqual([
+      { id: "library-1", title: "Pirate", content: "Talk like a pirate." },
+    ]);
+  });
+
+  it("treats a quote mid-field as a literal character, not a re-open", () => {
+    const csv = 'act,prompt\nPirate,ba"nana\n';
+    expect(parsePromptLibraryCsv(csv)).toEqual([
+      { id: "library-1", title: "Pirate", content: 'ba"nana' },
+    ]);
+  });
+
   it("handles a file with no trailing newline", () => {
     const csv = 'act,prompt\nPirate,"Talk like a pirate."';
     expect(parsePromptLibraryCsv(csv)).toEqual([

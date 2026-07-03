@@ -6,6 +6,7 @@
  * everywhere) so re-running a partially-applied migration is safe.
  */
 
+import { withTransaction } from "./transaction";
 import type { SqlDatabase } from "./types";
 
 interface Migration {
@@ -116,10 +117,17 @@ export function runMigrations(db: SqlDatabase): void {
   );
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.id)) continue;
-    db.execSync(migration.sql);
-    db.runSync("INSERT INTO migrations (id, applied_at) VALUES (?, ?)", [
-      migration.id,
-      Date.now(),
-    ]);
+    // Apply + record as one transaction: a crash between the two (e.g. after
+    // `ALTER TABLE ... ADD COLUMN`, before the migrations-table insert) would
+    // otherwise replay a non-idempotent statement on next boot and crash
+    // again with "duplicate column name" — not every statement in a
+    // migration can use `IF NOT EXISTS`.
+    withTransaction(db, () => {
+      db.execSync(migration.sql);
+      db.runSync("INSERT INTO migrations (id, applied_at) VALUES (?, ?)", [
+        migration.id,
+        Date.now(),
+      ]);
+    });
   }
 }

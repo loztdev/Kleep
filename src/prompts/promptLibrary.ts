@@ -42,7 +42,7 @@ export async function listPromptLibrary(
 export function parsePromptLibraryCsv(csv: string): PromptLibraryEntry[] {
   const rows = parseCsv(csv);
   if (rows.length === 0) return [];
-  const header = rows[0]!;
+  const header = rows[0]!.map((h) => h.trim());
   const actIdx = header.indexOf("act");
   const promptIdx = header.indexOf("prompt");
   if (actIdx === -1 || promptIdx === -1) return [];
@@ -88,7 +88,10 @@ function parseCsv(text: string): string[][] {
       i++;
       continue;
     }
-    if (char === '"') {
+    if (char === '"' && field.length === 0) {
+      // Only treat a quote as a field-opener when it's the field's first
+      // character, per RFC4180 — a bare quote after other content has
+      // already accumulated is a literal character, not a re-open.
       inQuotes = true;
       i++;
       continue;

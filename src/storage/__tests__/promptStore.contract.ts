@@ -38,6 +38,13 @@ export function describePromptStoreContract(
       expect(store.list().map((p) => p.id)).toEqual(["old", "new"]);
     });
 
+    it("breaks updatedAt ties deterministically by id", () => {
+      const store = makeStore();
+      store.create({ id: "b", title: "B", content: "b", now: 100 });
+      store.create({ id: "a", title: "A", content: "a", now: 100 });
+      expect(store.list().map((p) => p.id)).toEqual(["a", "b"]);
+    });
+
     it("update changes title/content and bumps updatedAt", () => {
       const store = makeStore();
       store.create({ id: "p1", title: "Pirate", content: "Talk like a pirate.", now: 100 });

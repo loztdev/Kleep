@@ -145,8 +145,13 @@ export function ChatScreen({
   };
 
   const handleSelectSystemPrompt = (content: string) => {
-    setActiveSystemPrompt(content);
-    if (sessionId && sessionStore) sessionStore.updateSystemPrompt(sessionId, content, Date.now());
+    try {
+      if (sessionId && sessionStore) sessionStore.updateSystemPrompt(sessionId, content, Date.now());
+      setActiveSystemPrompt(content);
+    } catch (err) {
+      console.error("updateSystemPrompt failed:", err);
+      setError(friendlyErrorMessage(err));
+    }
   };
 
   const tickMemoryPipeline = async () => {

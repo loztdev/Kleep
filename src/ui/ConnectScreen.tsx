@@ -122,6 +122,8 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
           value={systemPrompt}
           onChangeText={setSystemPrompt}
           autoCapitalize="none"
+          autoCorrect={false}
+          multiline
           editable={!connecting}
         />
         <Pressable

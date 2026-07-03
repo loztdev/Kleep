@@ -51,13 +51,18 @@ interface TurnRow {
   summarized: number;
 }
 
+/** `{}` when `value` is falsy (empty string counts as "unset", matching `model`'s existing behavior), else `{ [key]: value }`. */
+function optionalField<K extends string, V>(key: K, value: V | null | undefined): Partial<Record<K, V>> {
+  return value ? ({ [key]: value } as Partial<Record<K, V>>) : {};
+}
+
 function toMeta(row: SessionRow): ChatSessionMeta {
   return {
     id: row.id,
     title: row.title,
     providerKind: row.provider_kind as LlmProviderKind,
-    ...(row.model ? { model: row.model } : {}),
-    ...(row.system_prompt ? { systemPrompt: row.system_prompt } : {}),
+    ...optionalField("model", row.model),
+    ...optionalField("systemPrompt", row.system_prompt),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -92,8 +97,8 @@ export class ChatSessionStore {
       id: opts.id,
       title: opts.title,
       providerKind: opts.providerKind,
-      ...(opts.model ? { model: opts.model } : {}),
-      ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+      ...optionalField("model", opts.model),
+      ...optionalField("systemPrompt", opts.systemPrompt),
       createdAt: opts.now,
       updatedAt: opts.now,
     };
