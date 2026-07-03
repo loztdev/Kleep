@@ -9,27 +9,10 @@ export interface ModelInfo {
   description?: string;
 }
 
-/** How long a model-catalog fetch gets before it's aborted as hung. */
-export const MODEL_FETCH_TIMEOUT_MS = 10_000;
-
 /**
- * Runs `fn` with an `AbortSignal` that fires after `MODEL_FETCH_TIMEOUT_MS`
- * or when `external` (e.g. `ModelPickerModal` unmounting) aborts first,
- * whichever comes first. Avoids `AbortSignal.timeout`/`.any` — not
- * guaranteed present on Hermes, the RN JS engine this app ships on.
+ * Re-exported under the original names — this used to be a model-catalog-
+ * only helper; the prompt library needed the identical timeout/cancellation
+ * logic, so it moved to `src/util/fetchTimeout.ts`. Kept here so
+ * `src/claude/models.ts`/`src/llm/openrouter/models.ts` don't need to change.
  */
-export async function withModelFetchTimeout<T>(
-  fn: (signal: AbortSignal) => Promise<T>,
-  external?: AbortSignal,
-): Promise<T> {
-  const controller = new AbortController();
-  const onExternalAbort = () => controller.abort();
-  external?.addEventListener("abort", onExternalAbort);
-  const timeout = setTimeout(() => controller.abort(), MODEL_FETCH_TIMEOUT_MS);
-  try {
-    return await fn(controller.signal);
-  } finally {
-    clearTimeout(timeout);
-    external?.removeEventListener("abort", onExternalAbort);
-  }
-}
+export { FETCH_TIMEOUT_MS as MODEL_FETCH_TIMEOUT_MS, withFetchTimeout as withModelFetchTimeout } from "../util/fetchTimeout";

@@ -5,13 +5,17 @@ import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "./src/
 import { clearApiKey, loadActiveProvider, loadApiKey } from "./src/llm/secureKeyStore";
 import {
   ChatSessionStore,
+  InMemoryPromptStore,
   InMemoryStructuredStore,
   InMemoryVectorStore,
+  SqlitePromptStore,
   SqliteStructuredStore,
   SqliteVectorStore,
+  type PromptStore,
   type StructuredStore,
   type VectorStore,
 } from "./src/storage";
+import type { SqlDatabase } from "./src/storage/sql/types";
 import { openKleepDatabase } from "./src/storage/sql/openKleepDatabase";
 import { ChatListScreen } from "./src/ui/ChatListScreen";
 import { ChatScreen } from "./src/ui/ChatScreen";
@@ -24,14 +28,20 @@ import { BG, MUTED } from "./src/ui/theme";
  * session — only the transcript is per-session (see `ChatScreen.tsx`,
  * `ChatSessionStore`). `sessionStore` is `null` on web (no persistence —
  * see `openKleepDatabase.ts`), which is also how the app knows to skip
- * the chat list and go straight to a single ephemeral chat.
+ * the chat list and go straight to a single ephemeral chat. `promptStore`
+ * is always available (even on web) — saved prompts don't need native
+ * persistence to be useful for the length of a session, same as
+ * `structured`/`vector`. `defaultSystemPrompt` seeds new chats' system
+ * prompt the same way `model` seeds their model (Tier 7.6).
  */
 interface ConnectedContext {
   provider: LlmProvider;
   providerKind: LlmProviderKind;
   model?: string;
+  defaultSystemPrompt?: string;
   structured: StructuredStore;
   vector: VectorStore;
+  promptStore: PromptStore;
   sessionStore: ChatSessionStore | null;
 }
 
@@ -43,17 +53,21 @@ type AppState =
   | { status: "memory"; ctx: ConnectedContext; returnTo: AppState };
 
 function buildConnectedContext(
+  db: SqlDatabase | null,
+  promptStore: PromptStore,
   provider: LlmProvider,
   providerKind: LlmProviderKind,
   model?: string,
+  defaultSystemPrompt?: string,
 ): ConnectedContext {
-  const db = openKleepDatabase();
   return {
     provider,
     providerKind,
     ...(model ? { model } : {}),
+    ...(defaultSystemPrompt ? { defaultSystemPrompt } : {}),
     structured: db ? new SqliteStructuredStore(db) : new InMemoryStructuredStore(),
     vector: db ? new SqliteVectorStore(db) : new InMemoryVectorStore(),
+    promptStore,
     sessionStore: db ? new ChatSessionStore(db) : null,
   };
 }
@@ -65,6 +79,13 @@ function initialConnectedState(ctx: ConnectedContext): AppState {
 
 export default function App() {
   const [state, setState] = useState<AppState>({ status: "loading" });
+  // Opened once for the app's lifetime, independent of connecting — saved
+  // prompts (and the chat list) need this before any provider is chosen.
+  const [db] = useState(() => openKleepDatabase());
+  const promptStore = useMemo<PromptStore>(
+    () => (db ? new SqlitePromptStore(db) : new InMemoryPromptStore()),
+    [db],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +96,7 @@ export default function App() {
         if (cancelled) return;
         if (kind && apiKey) {
           const provider = buildLlmProvider({ kind, apiKey });
-          setState(initialConnectedState(buildConnectedContext(provider, kind)));
+          setState(initialConnectedState(buildConnectedContext(db, promptStore, provider, kind)));
         } else {
           setState({ status: "disconnected" });
         }
@@ -87,6 +108,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleDisconnect = useCallback(() => {
@@ -100,9 +122,16 @@ export default function App() {
     setState({ status: "disconnected" });
   }, []);
 
-  const handleConnected = useCallback((provider: LlmProvider, kind: LlmProviderKind, model?: string) => {
-    setState(initialConnectedState(buildConnectedContext(provider, kind, model)));
-  }, []);
+  const handleConnected = useCallback(
+    (provider: LlmProvider, kind: LlmProviderKind, model?: string, defaultSystemPrompt?: string) => {
+      setState(
+        initialConnectedState(
+          buildConnectedContext(db, promptStore, provider, kind, model, defaultSystemPrompt),
+        ),
+      );
+    },
+    [db, promptStore],
+  );
 
   if (state.status === "loading") {
     return (
@@ -116,7 +145,7 @@ export default function App() {
   if (state.status === "disconnected") {
     return (
       <View style={styles.flex}>
-        <ConnectScreen onConnected={handleConnected} />
+        <ConnectScreen promptStore={promptStore} onConnected={handleConnected} />
         <StatusBar style="light" />
       </View>
     );
@@ -154,6 +183,8 @@ export default function App() {
         model={state.ctx.model}
         structured={state.ctx.structured}
         vector={state.ctx.vector}
+        promptStore={state.ctx.promptStore}
+        defaultSystemPrompt={state.ctx.defaultSystemPrompt}
         sessionId={state.sessionId}
         sessionStore={state.ctx.sessionStore}
         onDisconnect={handleDisconnect}
@@ -193,6 +224,7 @@ function ChatListBody({
       title: "New chat",
       providerKind: ctx.providerKind,
       ...(ctx.model ? { model: ctx.model } : {}),
+      ...(ctx.defaultSystemPrompt ? { systemPrompt: ctx.defaultSystemPrompt } : {}),
       now: Date.now(),
     });
     onOpenChat(session.id);

@@ -24,6 +24,14 @@ export interface LlmSendOptions {
   system?: string;
   model?: string;
   maxTokens?: number;
+  /**
+   * Request prompt caching, where the underlying provider supports it (currently
+   * Claude's automatic/top-level `cache_control`). Providers without a caching
+   * concept (e.g. OpenRouter) ignore this field. Only worth setting on calls
+   * whose `messages` will grow past the target model's minimum cacheable token
+   * count — see `SendMessageOptions.cache` in `src/claude/client.ts`.
+   */
+  cache?: boolean;
 }
 
 /** Token usage for one call, normalized across providers. */

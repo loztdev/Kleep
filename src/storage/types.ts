@@ -121,3 +121,34 @@ export interface VectorStore {
    */
   list(filter?: VectorQueryFilter): LoreSnippet[];
 }
+
+/** A user-saved system prompt — plain app config, no provenance tracking needed. */
+export interface SavedPrompt {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Persistence contract for user-saved system prompts (Tier 7.6). Unlike
+ * `ChatSessionStore`, this has an in-memory fallback (`InMemoryPromptStore`)
+ * so saved prompts still work for the length of a session on web, the
+ * same way `structured`/`vector` do — only chat *history* is native-only.
+ */
+export interface PromptStore {
+  /** Create a new saved prompt. */
+  create(prompt: { id: string; title: string; content: string; now: number }): SavedPrompt;
+
+  /** Every saved prompt, most-recently-updated first. */
+  list(): SavedPrompt[];
+
+  get(id: string): SavedPrompt | undefined;
+
+  /** Update a prompt's title/content; bumps `updatedAt`. No-op if `id` is unknown. */
+  update(id: string, fields: { title: string; content: string }, now: number): void;
+
+  /** Remove a prompt by id; returns true if it existed. */
+  delete(id: string): boolean;
+}

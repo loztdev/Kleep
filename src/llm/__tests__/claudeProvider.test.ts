@@ -56,6 +56,17 @@ describe("ClaudeProvider", () => {
     expect(provider.name).toBe("claude");
   });
 
+  it("forwards `cache: true` down to the Claude request's cache_control", async () => {
+    const transport = new StubTransport(async () => textMessage("hello"));
+    const provider = new ClaudeProvider(new ClaudeClient({ transport }));
+
+    await provider.sendMessage({ messages: [{ role: "user", content: "hi" }] });
+    expect(transport.calls[0]!.cache_control).toBeUndefined();
+
+    await provider.sendMessage({ messages: [{ role: "user", content: "hi" }], cache: true });
+    expect(transport.calls[1]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+
   it("adapts structured() — Zod schema is reused as-is", async () => {
     const transport = new StubTransport(async () => toolUseMessage("pick", { value: 7 }));
     const provider = new ClaudeProvider(new ClaudeClient({ transport }));

@@ -23,6 +23,13 @@ export interface ClaudeRequest {
   system?: string;
   tools?: Anthropic.Tool[];
   tool_choice?: Anthropic.ToolChoice;
+  /**
+   * Top-level (automatic) prompt caching — a single marker that caches
+   * everything up to the last cacheable block and moves forward as the
+   * conversation grows, no per-block bookkeeping needed. See
+   * docs/build-with-claude/prompt-caching.
+   */
+  cache_control?: Anthropic.CacheControlEphemeral;
 }
 
 /** A streamed message in progress — implements both async iteration and the SDK's `finalMessage()` convenience. */

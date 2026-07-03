@@ -16,6 +16,10 @@ export interface ModelPricing {
   outputPerMTok: number;
 }
 
+/** Prompt-caching price multipliers (of `inputPerMTok`) — see docs/build-with-claude/prompt-caching. Only 5-minute-TTL writes are used today; Kleep doesn't expose a 1-hour-TTL option. */
+const CACHE_WRITE_5M_MULTIPLIER = 1.25;
+const CACHE_READ_MULTIPLIER = 0.1;
+
 /** Snapshot pricing for current-generation models. Override via `CostTracker`'s constructor for custom/negotiated rates. */
 export const DEFAULT_PRICING: Readonly<Record<string, ModelPricing>> = {
   "claude-fable-5": { inputPerMTok: 10, outputPerMTok: 50 },
@@ -50,15 +54,21 @@ export class CostTracker {
     const price = this.pricing[model];
     const inputTokens = usage.input_tokens;
     const outputTokens = usage.output_tokens;
+    const cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
+    const cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
     const costUsd = price
-      ? (inputTokens * price.inputPerMTok + outputTokens * price.outputPerMTok) / 1_000_000
+      ? (inputTokens * price.inputPerMTok +
+          outputTokens * price.outputPerMTok +
+          cacheCreationInputTokens * price.inputPerMTok * CACHE_WRITE_5M_MULTIPLIER +
+          cacheReadInputTokens * price.inputPerMTok * CACHE_READ_MULTIPLIER) /
+        1_000_000
       : 0;
     const entry: CostEntry = {
       model,
       inputTokens,
       outputTokens,
-      cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
-      cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens,
+      cacheCreationInputTokens,
       costUsd,
     };
     this.entries.push(entry);

@@ -15,7 +15,8 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 - Auth via Expo SecureStore — `src/claude/secureKeyStore.ts` (not in the `src/claude` barrel; it touches a native module, so import it directly from app code)
 - Retry with jitter on 429 / 529 / transient 5xx — `src/claude/retry.ts`
 - Streaming support (for chat — Tier 7) — `client.streamMessage()`
-- Token + cost accounting per call, exposed for the settings dashboard — `src/claude/costTracker.ts`
+- Token + cost accounting per call, exposed for the settings dashboard — `src/claude/costTracker.ts` (prices cache-write/cache-read tokens at their real 1.25×/0.1× multipliers, not $0)
+- Prompt caching (new, by request) — `SendMessageOptions.cache` opts a call into Anthropic's automatic `cache_control`, threaded through `LlmSendOptions.cache` for provider-agnostic callers; only `chatReply.ts` sets it, since it's the one call site whose prompt reliably grows past a model's minimum cacheable token count
 - Structured-output helper (Zod schema → tool-call definition) — `src/claude/zodToJsonSchema.ts` + `client.structured()`
 - Fixture-record/replay harness so Jest tests stay deterministic — `src/claude/fixtures.ts` (`FixtureTransport`)
 
@@ -318,6 +319,33 @@ Status: 🔥 unblocks the most downstream work · ⚡ quick win · 🧱 foundati
 - The screen renders and node-tap interaction works — **not verified in a live RN session** (no simulator/device in this sandbox), same verification depth as #15; verified instead that `tsc`/the full Jest suite (404 tests) pass and that the web bundle still builds and serves cleanly with the new `react-native-svg` dependency (HTTP 200, no unresolved-import errors), confirming it doesn't repeat #15's web-bundle break.
 
 **Depends on:** #15 (Memory browser cards, `MemoryBrowserScreen.tsx`/`StructuredStore`/`VectorStore`).
+
+---
+
+## 17. System prompts + prompt library ⚡ (not in the original top-10, added by request)
+
+**Why:** requested directly — save custom system prompts, browse saved ones, and pull in prompts "from all around the internet."
+
+**Research finding that shaped the design:** `LlmSendOptions.system` (and both `ClaudeProvider`/`OpenRouterClient` honoring it) already existed end-to-end — every reply already went out with a system prompt, just a hardcoded one baked into `chatReply.ts`'s `DEFAULT_SYSTEM_PROMPT` constant, invisible/non-configurable. So this was additive UI/storage work, not an LLM-architecture change. Separately: there's no live "prompt library API" the way there's a real model-list endpoint for LLM providers — the community half is seeded from `awesome-chatgpt-prompts`, a well-known public GitHub CSV, fetched live (no auth, no caching — same fetch-on-open pattern as the model picker).
+
+**Built:**
+- `PromptStore` (`src/storage/types.ts`) + `InMemoryPromptStore`/`SqlitePromptStore` — same "interface with an in-memory fallback" pattern as `StructuredStore`/`VectorStore`, not `ChatSessionStore`'s native-only pattern, since saved prompts are useful for the length of a session on web too. New `saved_prompts` table + migration `0002_prompts` (same migration also adds `chat_sessions.system_prompt TEXT`).
+- `ChatSessionStore`: `ChatSessionMeta.systemPrompt?`, `createSession()` accepts it, new `updateSystemPrompt(id, prompt, now)` — bumps `updated_at` (an active edit to that chat), unlike `updateProviderMeta()`'s silent correction.
+- `src/util/fetchTimeout.ts` (new) — `withModelFetchTimeout`/`MODEL_FETCH_TIMEOUT_MS` from #14 moved here as `withFetchTimeout`/`FETCH_TIMEOUT_MS` once the prompt library needed the identical timeout/cancellation logic; re-exported from `modelCatalog.ts` under the old names so #14's call sites didn't need to change.
+- `src/prompts/promptLibrary.ts` (new) — `listPromptLibrary()` fetches `raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv` and hand-parses it (a real character-scanning RFC4180-ish parser: quoted fields, `""`-escaped quotes, commas/newlines embedded inside quoted fields — confirmed all three occur in the live dataset by fetching and inspecting it directly, rather than adding a CSV library dependency for one file).
+- `chatReply.generateReply()` gained an optional third `systemPrompt` param — fully **replaces** the default persona when set (a user who picks/writes a prompt wants that prompt, not a blend), falls back to `DEFAULT_SYSTEM_PROMPT` otherwise.
+- `PromptPickerModal.tsx` (new) — Saved tab (list/create/edit/delete via `PromptStore`, inline create/edit form) + Library tab (search the fetched CSV, tap to use directly or bookmark-icon to copy into Saved). Mirrors `ModelPickerModal.tsx`'s structure/conventions.
+- Wiring: `ConnectScreen.tsx` gets a "Default system prompt" field + Browse button (same shape as the model field) — `onConnected` gained a 4th `defaultSystemPrompt?` param. `App.tsx`: `openKleepDatabase()` + `PromptStore` construction moved to the top of `App()` (a `useState` lazy initializer), since `ConnectScreen` needs a `PromptStore` *before* any provider is connected — previously the DB was only opened inside `buildConnectedContext()`, triggered by connecting. `ConnectedContext` carries `promptStore`/`defaultSystemPrompt`; `ChatListBody.handleNewChat` spreads the default into `createSession()` the same way it already does for `model`. `ChatScreen.tsx` gets a new header icon opening `PromptPickerModal` scoped to that one chat; selecting persists via `updateSystemPrompt()` and updates local state feeding `generateReply()`.
+
+**Done when:**
+- `PromptStore` behavior verified against both implementations — new `src/storage/__tests__/promptStore.contract.ts` (7 tests × 2 impls) ✅
+- `ChatSessionStore`'s new `systemPrompt` field/`updateSystemPrompt()` verified — 4 new tests in `chatSessionStore.test.ts` ✅
+- CSV parsing verified against hand-built fixtures covering embedded commas/escaped quotes/embedded newlines/reordered columns/missing columns (11 tests in `promptLibrary.test.ts`), **and** against a live snapshot of the real dataset (`promptLibrary.smoke.test.ts`, self-skips if the fixture isn't present — not committed, it's a ~100k-line third-party file) ✅
+- `withFetchTimeout` extraction verified — existing `models.test.ts` suites still pass unchanged, plus new direct tests in `fetchTimeout.test.ts` ✅
+- Full suite (`tsc` + Jest, 437 tests / 47 suites) passes; web bundle re-verified clean (HTTP 200, no unresolved-import errors) after the `App.tsx` DB-lifecycle change ✅
+- The screens render and the picker/create/edit/save-from-library interactions work — **not verified in a live RN session** (no simulator/device in this sandbox), same verification depth as #14/#15/#16.
+
+**Depends on:** #4/#6 (persistence layer, `SqlDatabase`/migrations), #14 (model browser — `withFetchTimeout`'s predecessor, `ModelPickerModal.tsx`'s conventions).
 
 ---
 

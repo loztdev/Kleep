@@ -20,6 +20,8 @@ export interface ChatSessionMeta {
   title: string;
   providerKind: LlmProviderKind;
   model?: string;
+  /** Per-chat system prompt override — falls back to the app default (or Kleep's built-in persona) when unset. */
+  systemPrompt?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -35,6 +37,7 @@ interface SessionRow {
   title: string;
   provider_kind: string;
   model: string | null;
+  system_prompt: string | null;
   created_at: number;
   updated_at: number;
   processed_count: number;
@@ -48,12 +51,18 @@ interface TurnRow {
   summarized: number;
 }
 
+/** `{}` when `value` is falsy (empty string counts as "unset", matching `model`'s existing behavior), else `{ [key]: value }`. */
+function optionalField<K extends string, V>(key: K, value: V | null | undefined): Partial<Record<K, V>> {
+  return value ? ({ [key]: value } as Partial<Record<K, V>>) : {};
+}
+
 function toMeta(row: SessionRow): ChatSessionMeta {
   return {
     id: row.id,
     title: row.title,
     providerKind: row.provider_kind as LlmProviderKind,
-    ...(row.model ? { model: row.model } : {}),
+    ...optionalField("model", row.model),
+    ...optionalField("systemPrompt", row.system_prompt),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -68,18 +77,28 @@ export class ChatSessionStore {
     title: string;
     providerKind: LlmProviderKind;
     model?: string;
+    systemPrompt?: string;
     now: number;
   }): ChatSessionMeta {
     this.db.runSync(
-      `INSERT INTO chat_sessions (id, title, provider_kind, model, created_at, updated_at, processed_count)
-       VALUES (?, ?, ?, ?, ?, ?, 0)`,
-      [opts.id, opts.title, opts.providerKind, opts.model ?? null, opts.now, opts.now],
+      `INSERT INTO chat_sessions (id, title, provider_kind, model, system_prompt, created_at, updated_at, processed_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+      [
+        opts.id,
+        opts.title,
+        opts.providerKind,
+        opts.model ?? null,
+        opts.systemPrompt ?? null,
+        opts.now,
+        opts.now,
+      ],
     );
     return {
       id: opts.id,
       title: opts.title,
       providerKind: opts.providerKind,
-      ...(opts.model ? { model: opts.model } : {}),
+      ...optionalField("model", opts.model),
+      ...optionalField("systemPrompt", opts.systemPrompt),
       createdAt: opts.now,
       updatedAt: opts.now,
     };
@@ -122,6 +141,14 @@ export class ChatSessionStore {
       model ?? null,
       id,
     ]);
+  }
+
+  /** Set (or clear, passing `undefined`) this chat's system prompt override. */
+  updateSystemPrompt(id: string, systemPrompt: string | undefined, now: number): void {
+    this.db.runSync(
+      "UPDATE chat_sessions SET system_prompt = ?, updated_at = ? WHERE id = ?",
+      [systemPrompt ?? null, now, id],
+    );
   }
 
   deleteSession(id: string): void {

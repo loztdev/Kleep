@@ -80,6 +80,17 @@ describe("ClaudeClient.sendMessage", () => {
     expect(transport.sendCalls[0]).toMatchObject({ model: "claude-haiku-4-5", max_tokens: 222 });
   });
 
+  it("omits cache_control by default, and sets it when `cache: true` is requested", async () => {
+    const transport = new StubTransport(async () => textMessage("hello"));
+    const client = new ClaudeClient({ transport });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }] });
+    expect(transport.sendCalls[0]!.cache_control).toBeUndefined();
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], cache: true });
+    expect(transport.sendCalls[1]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+
   it("retries on 429 with backoff, then succeeds", async () => {
     let attempts = 0;
     const transport = new StubTransport(async () => {

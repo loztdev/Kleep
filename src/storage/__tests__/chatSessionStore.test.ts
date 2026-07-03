@@ -147,6 +147,48 @@ describe("ChatSessionStore", () => {
     expect(store.loadSession("s1").turns.map((t) => t.id)).toEqual(["t1", "t2"]);
   });
 
+  it("createSession stores a systemPrompt when provided", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    const meta = store.createSession({
+      id: "s1",
+      title: "Chat",
+      providerKind: "claude",
+      systemPrompt: "Talk like a pirate.",
+      now: 100,
+    });
+    expect(meta.systemPrompt).toBe("Talk like a pirate.");
+    expect(store.getSession("s1")?.systemPrompt).toBe("Talk like a pirate.");
+  });
+
+  it("omits systemPrompt when not provided", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    const meta = store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    expect(meta.systemPrompt).toBeUndefined();
+    expect(store.getSession("s1")?.systemPrompt).toBeUndefined();
+  });
+
+  it("updateSystemPrompt sets the override and bumps updated_at", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    store.updateSystemPrompt("s1", "Be extremely terse.", 200);
+    const meta = store.getSession("s1");
+    expect(meta?.systemPrompt).toBe("Be extremely terse.");
+    expect(meta?.updatedAt).toBe(200);
+  });
+
+  it("updateSystemPrompt(undefined) clears the override", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({
+      id: "s1",
+      title: "Chat",
+      providerKind: "claude",
+      systemPrompt: "Be extremely terse.",
+      now: 100,
+    });
+    store.updateSystemPrompt("s1", undefined, 200);
+    expect(store.getSession("s1")?.systemPrompt).toBeUndefined();
+  });
+
   it("updateProviderMeta corrects provider/model without bumping updated_at", () => {
     const store = new ChatSessionStore(openTestDatabase());
     store.createSession({
