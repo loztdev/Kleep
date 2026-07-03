@@ -6,7 +6,17 @@
  */
 
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
 import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
 import type { PromptStore } from "../storage";
@@ -62,106 +72,108 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   };
 
   return (
-    <ScrollView
+    <KeyboardAvoidingView
       style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-      keyboardShouldPersistTaps="handled"
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
-      <Text style={styles.title}>Connect Kleep</Text>
-      <Text style={styles.subtitle}>Pick a provider and paste an API key to start chatting.</Text>
+      <ScrollView contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Connect Kleep</Text>
+        <Text style={styles.subtitle}>Pick a provider and paste an API key to start chatting.</Text>
 
-      <View style={styles.providerRow}>
-        {PROVIDERS.map((p) => (
+        <View style={styles.providerRow}>
+          {PROVIDERS.map((p) => (
+            <Pressable
+              key={p.kind}
+              onPress={() => setKind(p.kind)}
+              disabled={connecting}
+              style={[styles.providerButton, kind === p.kind && styles.providerButtonActive]}
+            >
+              <Text style={[styles.providerButtonText, kind === p.kind && styles.providerButtonTextActive]}>
+                {p.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <TextInput
+          style={styles.input}
+          placeholder={PROVIDERS.find((p) => p.kind === kind)?.keyHint}
+          placeholderTextColor={MUTED}
+          value={apiKey}
+          onChangeText={setApiKey}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          editable={!connecting}
+        />
+        <View style={styles.modelRow}>
+          <TextInput
+            style={[styles.input, styles.modelInput]}
+            placeholder="Model override (optional)"
+            placeholderTextColor={MUTED}
+            value={model}
+            onChangeText={setModel}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!connecting}
+          />
           <Pressable
-            key={p.kind}
-            onPress={() => setKind(p.kind)}
+            style={styles.browseButton}
+            onPress={() => setPickerVisible(true)}
             disabled={connecting}
-            style={[styles.providerButton, kind === p.kind && styles.providerButtonActive]}
+            accessibilityRole="button"
+            accessibilityLabel="Browse models"
           >
-            <Text style={[styles.providerButtonText, kind === p.kind && styles.providerButtonTextActive]}>
-              {p.label}
-            </Text>
+            <Text style={styles.browseButtonText}>Browse</Text>
           </Pressable>
-        ))}
-      </View>
+        </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder={PROVIDERS.find((p) => p.kind === kind)?.keyHint}
-        placeholderTextColor={MUTED}
-        value={apiKey}
-        onChangeText={setApiKey}
-        autoCapitalize="none"
-        autoCorrect={false}
-        secureTextEntry
-        editable={!connecting}
-      />
-      <View style={styles.modelRow}>
-        <TextInput
-          style={[styles.input, styles.modelInput]}
-          placeholder="Model override (optional)"
-          placeholderTextColor={MUTED}
-          value={model}
-          onChangeText={setModel}
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!connecting}
-        />
-        <Pressable
-          style={styles.browseButton}
-          onPress={() => setPickerVisible(true)}
-          disabled={connecting}
-          accessibilityRole="button"
-          accessibilityLabel="Browse models"
-        >
-          <Text style={styles.browseButtonText}>Browse</Text>
+        <View style={styles.modelRow}>
+          <TextInput
+            style={[styles.input, styles.modelInput, styles.systemPromptInput]}
+            placeholder="Default system prompt (optional)"
+            placeholderTextColor={MUTED}
+            value={systemPrompt}
+            onChangeText={setSystemPrompt}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            textAlignVertical="top"
+            editable={!connecting}
+          />
+          <Pressable
+            style={styles.browseButton}
+            onPress={() => setPromptPickerVisible(true)}
+            disabled={connecting}
+            accessibilityRole="button"
+            accessibilityLabel="Browse system prompts"
+          >
+            <Text style={styles.browseButtonText}>Browse</Text>
+          </Pressable>
+        </View>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <Pressable style={styles.connectButton} onPress={handleConnect} disabled={connecting}>
+          {connecting ? <ActivityIndicator color="#fff" /> : <Text style={styles.connectButtonText}>Connect</Text>}
         </Pressable>
-      </View>
 
-      <View style={styles.modelRow}>
-        <TextInput
-          style={[styles.input, styles.modelInput, styles.systemPromptInput]}
-          placeholder="Default system prompt (optional)"
-          placeholderTextColor={MUTED}
-          value={systemPrompt}
-          onChangeText={setSystemPrompt}
-          autoCapitalize="none"
-          autoCorrect={false}
-          multiline
-          textAlignVertical="top"
-          editable={!connecting}
+        <ModelPickerModal
+          visible={pickerVisible}
+          kind={kind}
+          apiKey={apiKey}
+          onSelect={setModel}
+          onClose={() => setPickerVisible(false)}
         />
-        <Pressable
-          style={styles.browseButton}
-          onPress={() => setPromptPickerVisible(true)}
-          disabled={connecting}
-          accessibilityRole="button"
-          accessibilityLabel="Browse system prompts"
-        >
-          <Text style={styles.browseButtonText}>Browse</Text>
-        </Pressable>
-      </View>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <Pressable style={styles.connectButton} onPress={handleConnect} disabled={connecting}>
-        {connecting ? <ActivityIndicator color="#fff" /> : <Text style={styles.connectButtonText}>Connect</Text>}
-      </Pressable>
-
-      <ModelPickerModal
-        visible={pickerVisible}
-        kind={kind}
-        apiKey={apiKey}
-        onSelect={setModel}
-        onClose={() => setPickerVisible(false)}
-      />
-      <PromptPickerModal
-        visible={promptPickerVisible}
-        promptStore={promptStore}
-        onSelect={setSystemPrompt}
-        onClose={() => setPromptPickerVisible(false)}
-      />
-    </ScrollView>
+        <PromptPickerModal
+          visible={promptPickerVisible}
+          promptStore={promptStore}
+          onSelect={setSystemPrompt}
+          onClose={() => setPromptPickerVisible(false)}
+        />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
