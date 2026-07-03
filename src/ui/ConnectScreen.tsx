@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
 import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
 import type { PromptStore } from "../storage";
@@ -62,7 +62,11 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.title}>Connect Kleep</Text>
       <Text style={styles.subtitle}>Pick a provider and paste an API key to start chatting.</Text>
 
@@ -116,7 +120,7 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
 
       <View style={styles.modelRow}>
         <TextInput
-          style={[styles.input, styles.modelInput]}
+          style={[styles.input, styles.modelInput, styles.systemPromptInput]}
           placeholder="Default system prompt (optional)"
           placeholderTextColor={MUTED}
           value={systemPrompt}
@@ -124,6 +128,7 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
           autoCapitalize="none"
           autoCorrect={false}
           multiline
+          textAlignVertical="top"
           editable={!connecting}
         />
         <Pressable
@@ -156,7 +161,7 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
         onSelect={setSystemPrompt}
         onClose={() => setPromptPickerVisible(false)}
       />
-    </View>
+    </ScrollView>
   );
 }
 
@@ -164,6 +169,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BG,
+  },
+  contentContainer: {
+    flexGrow: 1,
     justifyContent: "center",
     padding: 24,
     gap: 12,
@@ -219,6 +227,9 @@ const styles = StyleSheet.create({
   },
   modelInput: {
     flex: 1,
+  },
+  systemPromptInput: {
+    maxHeight: 100,
   },
   browseButton: {
     borderWidth: 1,
