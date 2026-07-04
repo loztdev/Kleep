@@ -23,10 +23,20 @@ export interface CacheSettings {
   enabled: boolean;
   ttl?: "5m" | "1h";
   responseCacheTtlSeconds?: number;
+  /**
+   * Max output tokens the model can produce per reply. `0` (or leaving this
+   * unset) means unlimited — OpenRouter omits the field entirely and lets the
+   * underlying model's own maximum apply; Claude uses a high fallback (see
+   * `ClaudeClient.buildRequest`). Applies to output tokens, which includes
+   * the model's internal reasoning/thinking on models that spend output
+   * tokens on scratchpad before the visible reply — the old hardcoded 4096
+   * was aggressively low for reasoning models.
+   */
+  maxOutputTokens?: number;
 }
 
-/** Default caching behavior: real prompt caching on (5m), response caching off. */
-export const DEFAULT_CACHE_SETTINGS: CacheSettings = { enabled: true };
+/** Default caching behavior: real prompt caching on (5m), response caching off, unlimited output. */
+export const DEFAULT_CACHE_SETTINGS: CacheSettings = { enabled: true, maxOutputTokens: 0 };
 
 /**
  * Compose the effective system message. Layer order from front to back:
@@ -97,7 +107,12 @@ export async function generateReply(
   const result = await provider.sendMessage({
     messages,
     system: composeSystemPrompt(jailbreakPrompt, systemPrompt, activeSkills),
-    maxTokens: 500,
+    // `0` is the user-facing "unlimited" sentinel, handled provider-side:
+    // OpenRouter omits the field; Claude falls back to its max acceptable
+    // output. Any positive number goes through verbatim. `undefined` (from
+    // an old caller that never set the field) falls back to the provider
+    // client's own default.
+    maxTokens: cacheSettings.maxOutputTokens,
     // `messages` grows every turn, so once the conversation crosses the
     // model's minimum cacheable token count, later turns get cheaper,
     // faster reprocessing of the earlier history.

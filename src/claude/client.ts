@@ -237,9 +237,19 @@ export class ClaudeClient {
   }
 
   private buildRequest(opts: SendMessageOptions): ClaudeRequest {
+    // `maxTokens === 0` is the app's "unlimited" sentinel. Anthropic's
+    // Messages API always requires `max_tokens`, so we can't literally omit it
+    // — we translate to the largest value Claude Opus 4.7 and Sonnet 4-family
+    // routinely accept. If the caller's specific model has a lower cap the
+    // API returns a clear error and the user can dial down.
+    const CLAUDE_UNLIMITED_FALLBACK = 32000;
+    const maxTokens =
+      opts.maxTokens === 0
+        ? CLAUDE_UNLIMITED_FALLBACK
+        : opts.maxTokens ?? this.defaultMaxTokens;
     return {
       model: opts.model ?? this.defaultModel,
-      max_tokens: opts.maxTokens ?? this.defaultMaxTokens,
+      max_tokens: maxTokens,
       messages: [...opts.messages],
       ...(opts.system !== undefined ? { system: opts.system } : {}),
       ...(opts.tools !== undefined ? { tools: [...opts.tools] } : {}),

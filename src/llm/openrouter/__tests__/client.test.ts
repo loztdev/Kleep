@@ -62,6 +62,33 @@ describe("OpenRouterClient.sendMessage", () => {
     expect(transport.calls[0]).toMatchObject({ model: "openai/gpt-4o-mini" });
   });
 
+  it("omits max_tokens from the wire when maxTokens is 0 (the app's `unlimited` sentinel)", async () => {
+    const transport = new StubTransport(async () => textResponse("hi"));
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], maxTokens: 0 });
+
+    expect(transport.calls[0]).not.toHaveProperty("max_tokens");
+  });
+
+  it("still applies defaultMaxTokens when maxTokens is undefined (existing internal callers unaffected)", async () => {
+    const transport = new StubTransport(async () => textResponse("hi"));
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini", defaultMaxTokens: 4096 });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }] });
+
+    expect(transport.calls[0]?.max_tokens).toBe(4096);
+  });
+
+  it("sends a positive maxTokens through verbatim", async () => {
+    const transport = new StubTransport(async () => textResponse("hi"));
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], maxTokens: 65536 });
+
+    expect(transport.calls[0]?.max_tokens).toBe(65536);
+  });
+
   it("prefers a per-call model over defaultModel", async () => {
     const transport = new StubTransport(async () => textResponse("hi"));
     const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
