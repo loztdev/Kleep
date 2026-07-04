@@ -383,7 +383,13 @@ export function ChatScreen({
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      // Android needs "height" here — leaving it `undefined` (previous
+      // behavior) relied on `softwareKeyboardLayoutMode: "resize"` alone,
+      // but Expo SDK 51+ defaults to edge-to-edge which changes how the
+      // window resizes, hiding the composer under the soft keyboard. The
+      // explicit "resize" flag in app.json + "height" here together push
+      // the composer above the keyboard on both older and newer Androids.
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <View style={styles.header}>
