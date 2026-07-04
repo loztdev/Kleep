@@ -173,4 +173,31 @@ describe("ConversationBuffer", () => {
       expect(b.isSummarized("t2")).toBe(false);
     });
   });
+
+  describe("clear", () => {
+    it("empties every turn, id lookup, summarized mark, and the high-water mark", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "a", 0));
+      b.append(turn("t2", "b", 1));
+      b.markProcessed("t2");
+      b.markSummarized(["t1"]);
+
+      b.clear();
+
+      expect(b.size()).toBe(0);
+      expect(b.all()).toEqual([]);
+      expect(b.get("t1")).toBeUndefined();
+      expect(b.processedCount()).toBe(0);
+      expect(b.isSummarized("t1")).toBe(false);
+      expect(b.summarizedCount()).toBe(0);
+    });
+
+    it("leaves the buffer usable again — same-id append after clear works", () => {
+      const b = new ConversationBuffer();
+      b.append(turn("t1", "first", 0));
+      b.clear();
+      b.append(turn("t1", "second", 0));
+      expect(b.get("t1")?.content).toBe("second");
+    });
+  });
 });

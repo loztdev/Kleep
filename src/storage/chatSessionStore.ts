@@ -247,6 +247,28 @@ export class ChatSessionStore {
     });
   }
 
+  /**
+   * Wipe every turn from a session and reset its extraction/summary state
+   * without touching the session row itself (title, prompts, provider
+   * meta all stay). The chat surface uses this to break "in-context
+   * refusal locking" — where prior assistant turns pattern-match the
+   * model into continuing to refuse — by handing the session a clean
+   * transcript to work from. Kept as one transaction so a mid-write
+   * crash can't leave orphaned turns behind a reset `processed_count`.
+   * The shared memory stores (`structured`/`vector`) are deliberately
+   * untouched: they carry cross-session context that predates the
+   * session and shouldn't get flushed by a chat-scoped reset.
+   */
+  clearTurns(sessionId: string, now: number): void {
+    withTransaction(this.db, () => {
+      this.db.runSync("DELETE FROM chat_turns WHERE session_id = ?", [sessionId]);
+      this.db.runSync(
+        "UPDATE chat_sessions SET processed_count = 0, updated_at = ? WHERE id = ?",
+        [now, sessionId],
+      );
+    });
+  }
+
   updateProcessedCount(sessionId: string, count: number): void {
     this.db.runSync("UPDATE chat_sessions SET processed_count = ? WHERE id = ?", [
       count,
