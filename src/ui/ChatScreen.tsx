@@ -42,7 +42,7 @@ import {
 import { ConversationBuffer, TurnRole, type Turn } from "../conversation";
 import type { LlmProvider, LlmProviderKind } from "../llm";
 import { newId } from "../schema";
-import type { ChatSessionStore, PromptStore, StructuredStore, VectorStore } from "../storage";
+import type { ChatSessionStore, PromptStore, SavedPromptKind, StructuredStore, VectorStore } from "../storage";
 import { DEFAULT_CACHE_SETTINGS, generateReply, type CacheSettings } from "./chatReply";
 import { friendlyErrorMessage } from "./friendlyError";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
@@ -58,6 +58,8 @@ interface ChatScreenProps {
   promptStore: PromptStore;
   /** Seeds a brand-new/ephemeral chat's system prompt; ignored once a session has its own stored value. */
   defaultSystemPrompt?: string;
+  /** Seeds a brand-new/ephemeral chat's jailbreak prompt; same "ignored once stored" rule as `defaultSystemPrompt`. */
+  defaultJailbreakPrompt?: string;
   /** App-wide caching preference set on `ConnectScreen`; defaults to real prompt caching on, response caching off. */
   cacheSettings?: CacheSettings;
   /** `null` on web — no persistence there, see `openKleepDatabase.ts`. */
@@ -77,6 +79,7 @@ export function ChatScreen({
   vector,
   promptStore,
   defaultSystemPrompt,
+  defaultJailbreakPrompt,
   cacheSettings = DEFAULT_CACHE_SETTINGS,
   sessionId,
   sessionStore,
@@ -84,7 +87,7 @@ export function ChatScreen({
   onOpenMemory,
   onBack,
 }: ChatScreenProps) {
-  const { engine, providerMismatch, initialSystemPrompt } = useMemo(() => {
+  const { engine, providerMismatch, initialSystemPrompt, initialJailbreakPrompt } = useMemo(() => {
     const buffer =
       sessionId && sessionStore
         ? (() => {
@@ -103,10 +106,12 @@ export function ChatScreen({
     // match what's actually happening from here on.
     let mismatch = false;
     let systemPrompt = defaultSystemPrompt;
+    let jailbreakPrompt = defaultJailbreakPrompt;
     if (sessionId && sessionStore) {
       const meta = sessionStore.getSession(sessionId);
       if (meta) {
         systemPrompt = meta.systemPrompt;
+        jailbreakPrompt = meta.jailbreakPrompt;
         if (meta.providerKind !== providerKind || meta.model !== model) {
           mismatch = true;
           sessionStore.updateProviderMeta(sessionId, providerKind, model);
@@ -118,6 +123,7 @@ export function ChatScreen({
       engine: buildMemoryEngine(provider, { structured, vector, buffer }),
       providerMismatch: mismatch,
       initialSystemPrompt: systemPrompt,
+      initialJailbreakPrompt: jailbreakPrompt,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, structured, vector, sessionId, sessionStore]);
@@ -128,7 +134,10 @@ export function ChatScreen({
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [activeSystemPrompt, setActiveSystemPrompt] = useState<string | undefined>(initialSystemPrompt);
-  const [promptPickerVisible, setPromptPickerVisible] = useState(false);
+  const [activeJailbreakPrompt, setActiveJailbreakPrompt] = useState<string | undefined>(initialJailbreakPrompt);
+  // One picker component instance, driven by which "slot" the user tapped to
+  // open it — persona icon vs jailbreak icon. `null` means the modal is hidden.
+  const [pickerKind, setPickerKind] = useState<SavedPromptKind | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   // `sending` (state) lags a render behind a tap, so a fast double-tap can
   // slip through before any button disables — this ref guard is synchronous.
@@ -153,6 +162,16 @@ export function ChatScreen({
       setActiveSystemPrompt(content);
     } catch (err) {
       console.error("updateSystemPrompt failed:", err);
+      setError(friendlyErrorMessage(err));
+    }
+  };
+
+  const handleSelectJailbreakPrompt = (content: string) => {
+    try {
+      if (sessionId && sessionStore) sessionStore.updateJailbreakPrompt(sessionId, content, Date.now());
+      setActiveJailbreakPrompt(content);
+    } catch (err) {
+      console.error("updateJailbreakPrompt failed:", err);
       setError(friendlyErrorMessage(err));
     }
   };
@@ -187,7 +206,13 @@ export function ChatScreen({
       setMessages(engine.buffer.all().slice());
       setInput("");
 
-      const replyText = await generateReply(provider, engine.buffer.liveTurns(), activeSystemPrompt, cacheSettings);
+      const replyText = await generateReply(
+        provider,
+        engine.buffer.liveTurns(),
+        activeSystemPrompt,
+        cacheSettings,
+        activeJailbreakPrompt,
+      );
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -223,7 +248,13 @@ export function ChatScreen({
       // mirror it into `engine.buffer` once that succeeds — a failure at
       // any step leaves the existing reply in place with nothing to roll
       // back, instead of the buffer running ahead of what's saved.
-      const replyText = await generateReply(provider, contextTurns, activeSystemPrompt, cacheSettings);
+      const replyText = await generateReply(
+        provider,
+        contextTurns,
+        activeSystemPrompt,
+        cacheSettings,
+        activeJailbreakPrompt,
+      );
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -268,7 +299,13 @@ export function ChatScreen({
 
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
-      const replyText = await generateReply(provider, [...priorTurns, editedTurn], activeSystemPrompt, cacheSettings);
+      const replyText = await generateReply(
+        provider,
+        [...priorTurns, editedTurn],
+        activeSystemPrompt,
+        cacheSettings,
+        activeJailbreakPrompt,
+      );
       const assistantTurn: Turn = {
         id: newId(),
         role: TurnRole.ASSISTANT,
@@ -318,7 +355,19 @@ export function ChatScreen({
         </View>
         <View style={styles.headerRight}>
           <Pressable
-            onPress={() => setPromptPickerVisible(true)}
+            onPress={() => setPickerKind("jailbreak")}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Choose jailbreak prompt"
+          >
+            <Ionicons
+              name={activeJailbreakPrompt ? "flame" : "flame-outline"}
+              size={20}
+              color={activeJailbreakPrompt ? ACCENT : MUTED}
+            />
+          </Pressable>
+          <Pressable
+            onPress={() => setPickerKind("persona")}
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel="Choose system prompt"
@@ -398,10 +447,11 @@ export function ChatScreen({
       </View>
 
       <PromptPickerModal
-        visible={promptPickerVisible}
+        visible={pickerKind !== null}
+        kind={pickerKind ?? "persona"}
         promptStore={promptStore}
-        onSelect={handleSelectSystemPrompt}
-        onClose={() => setPromptPickerVisible(false)}
+        onSelect={pickerKind === "jailbreak" ? handleSelectJailbreakPrompt : handleSelectSystemPrompt}
+        onClose={() => setPickerKind(null)}
       />
     </KeyboardAvoidingView>
   );

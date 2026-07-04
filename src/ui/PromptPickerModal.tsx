@@ -1,13 +1,19 @@
 /**
- * Tier 7.6 — system prompt picker. Two tabs: "Saved" (the user's own
- * prompts, backed by `PromptStore` — create/edit/delete inline) and
- * "Library" (the community "awesome-chatgpt-prompts" dataset, fetched
- * live, no auth needed — pick one directly or copy it into Saved).
+ * Tier 7.6 — system prompt picker. Three tabs:
  *
- * Used both as the connect-time "default prompt" picker and, scoped to
- * one chat, as the per-chat override picker (`ChatScreen.tsx`) — the
- * component itself doesn't know which; the caller decides what
- * `onSelect`'s content is applied to.
+ * - "Personas" — the user's own persona prompts (`SavedPromptKind: 'persona'`)
+ * - "Jailbreaks" — the user's own jailbreak prompts (`SavedPromptKind: 'jailbreak'`)
+ * - "Library" — the community "awesome-chatgpt-prompts" dataset, fetched
+ *   live, no auth needed. Library saves default to whichever kind the
+ *   picker was opened for.
+ *
+ * Both saved-kind tabs let a row be *moved* to the other kind (the swap
+ * icon) — one flat table under the hood, two views on top, so promoting a
+ * persona to a jailbreak (or vice versa) keeps its title/content intact.
+ *
+ * `kind` decides the initial tab and library-save target only — the user
+ * can freely flip tabs after opening. Used both at connect-time and per-chat
+ * (`ChatScreen.tsx`) with two instances, one per kind.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -25,21 +31,34 @@ import {
 } from "react-native";
 import { listPromptLibrary, type PromptLibraryEntry } from "../prompts";
 import { newId } from "../schema";
-import type { PromptStore, SavedPrompt } from "../storage";
+import type { PromptStore, SavedPrompt, SavedPromptKind } from "../storage";
 import { friendlyErrorMessage } from "./friendlyError";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface PromptPickerModalProps {
   visible: boolean;
   promptStore: PromptStore;
+  /** Which kind this picker is choosing for — drives the initial tab, the
+   * "New prompt" default kind, and where library saves land. */
+  kind: SavedPromptKind;
   onSelect: (content: string) => void;
   onClose: () => void;
 }
 
-type Tab = "saved" | "library";
+type Tab = "persona" | "jailbreak" | "library";
 
-export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: PromptPickerModalProps) {
-  const [tab, setTab] = useState<Tab>("saved");
+const TAB_LABELS: Record<Exclude<Tab, "library">, string> = {
+  persona: "Personas",
+  jailbreak: "Jailbreaks",
+};
+
+const OTHER_KIND: Record<SavedPromptKind, SavedPromptKind> = {
+  persona: "jailbreak",
+  jailbreak: "persona",
+};
+
+export function PromptPickerModal({ visible, promptStore, kind, onSelect, onClose }: PromptPickerModalProps) {
+  const [tab, setTab] = useState<Tab>(kind);
   const [query, setQuery] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
@@ -56,7 +75,7 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
 
   useEffect(() => {
     if (!visible) return;
-    setTab("saved");
+    setTab(kind);
     setQuery("");
     setCreating(false);
     setEditingId(null);
@@ -83,7 +102,7 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, promptStore]);
+  }, [visible, promptStore, kind]);
 
   useEffect(() => {
     setSavedPrompts(promptStore.list());
@@ -110,6 +129,13 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
     setEditingId(null);
   };
 
+  // Drafts always save into whichever saved-kind tab is currently visible so
+  // the "New prompt" button on the Jailbreaks tab creates a jailbreak, not a
+  // persona. Falling back to the picker's `kind` prop covers the Library-tab
+  // case where `tab === 'library'` (which shouldn't reach here in practice,
+  // since the "New prompt" button is hidden there).
+  const draftKind: SavedPromptKind = tab === "library" ? kind : (tab as SavedPromptKind);
+
   const submitDraft = () => {
     const title = draftTitle.trim();
     const content = draftContent.trim();
@@ -117,7 +143,7 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
     if (editingId) {
       promptStore.update(editingId, { title, content }, Date.now());
     } else {
-      promptStore.create({ id: newId(), title, content, now: Date.now() });
+      promptStore.create({ id: newId(), title, content, kind: draftKind, now: Date.now() });
     }
     setCreating(false);
     setEditingId(null);
@@ -130,21 +156,33 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
     refresh();
   };
 
-  // Keyed by title+content (not id — library entries and saved prompts have
-  // unrelated id schemes) so a library row's "saved" checkmark reflects the
-  // *current* saved list — including after the saved copy is deleted or
-  // edited elsewhere — instead of an ever-growing, never-shrinking set.
-  const promptKey = (title: string, content: string) => `${title}::${content}`;
-  const savedPromptKeys = new Set(savedPrompts.map((p) => promptKey(p.title, p.content)));
+  const moveKind = (prompt: SavedPrompt) => {
+    promptStore.setKind(prompt.id, OTHER_KIND[prompt.kind], Date.now());
+    refresh();
+  };
+
+  // Keyed by title+content+kind (not id — library entries and saved prompts
+  // have unrelated id schemes) so a library row's "saved" checkmark reflects
+  // the *current* saved list for the tab's kind — same content saved as
+  // persona shouldn't mark the jailbreak-tab row as already saved and vice
+  // versa (users may want the same text in both roles).
+  const promptKey = (title: string, content: string, k: SavedPromptKind) => `${k}::${title}::${content}`;
+  // Library saves land in the picker's originating `kind` — the "which slot
+  // was I opened for" — not whichever tab the user happens to be on.
+  const savedKeysForLibrary = new Set(
+    savedPrompts.filter((p) => p.kind === kind).map((p) => promptKey(p.title, p.content, kind)),
+  );
 
   const saveLibraryEntry = (entry: PromptLibraryEntry) => {
-    if (savedPromptKeys.has(promptKey(entry.title, entry.content))) return;
-    promptStore.create({ id: newId(), title: entry.title, content: entry.content, now: Date.now() });
+    if (savedKeysForLibrary.has(promptKey(entry.title, entry.content, kind))) return;
+    promptStore.create({ id: newId(), title: entry.title, content: entry.content, kind, now: Date.now() });
     refresh();
   };
 
   const q = query.trim().toLowerCase();
-  const filteredSaved = savedPrompts.filter(
+  const savedForActiveTab =
+    tab === "library" ? [] : savedPrompts.filter((p) => p.kind === (tab as SavedPromptKind));
+  const filteredSaved = savedForActiveTab.filter(
     (p) => !q || p.title.toLowerCase().includes(q) || p.content.toLowerCase().includes(q),
   );
   const filteredLibrary = (libraryEntries ?? []).filter(
@@ -152,12 +190,15 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
   );
 
   const showingDraft = creating || editingId !== null;
+  const personaCount = savedPrompts.filter((p) => p.kind === "persona").length;
+  const jailbreakCount = savedPrompts.filter((p) => p.kind === "jailbreak").length;
+  const title = kind === "jailbreak" ? "Jailbreak prompt" : "System prompt";
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>System prompt</Text>
+          <Text style={styles.title}>{title}</Text>
           <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
             <Ionicons name="close-outline" size={24} color={TEXT} />
           </Pressable>
@@ -170,11 +211,13 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
               style={styles.titleInput}
               value={draftTitle}
               onChangeText={setDraftTitle}
-              placeholder="e.g. Terse assistant"
+              placeholder={draftKind === "jailbreak" ? "e.g. Uncensored writer" : "e.g. Terse assistant"}
               placeholderTextColor={MUTED}
               autoFocus
             />
-            <Text style={styles.fieldLabel}>Prompt</Text>
+            <Text style={styles.fieldLabel}>
+              {draftKind === "jailbreak" ? "Jailbreak prompt" : "Persona prompt"}
+            </Text>
             <TextInput
               style={styles.contentInput}
               value={draftContent}
@@ -199,9 +242,17 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
         ) : (
           <>
             <View style={styles.tabs}>
-              <Pressable style={[styles.tab, tab === "saved" && styles.tabActive]} onPress={() => setTab("saved")}>
-                <Text style={[styles.tabText, tab === "saved" && styles.tabTextActive]}>
-                  Saved ({savedPrompts.length})
+              <Pressable style={[styles.tab, tab === "persona" && styles.tabActive]} onPress={() => setTab("persona")}>
+                <Text style={[styles.tabText, tab === "persona" && styles.tabTextActive]}>
+                  {TAB_LABELS.persona} ({personaCount})
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.tab, tab === "jailbreak" && styles.tabActive]}
+                onPress={() => setTab("jailbreak")}
+              >
+                <Text style={[styles.tabText, tab === "jailbreak" && styles.tabTextActive]}>
+                  {TAB_LABELS.jailbreak} ({jailbreakCount})
                 </Text>
               </Pressable>
               <Pressable style={[styles.tab, tab === "library" && styles.tabActive]} onPress={() => setTab("library")}>
@@ -219,11 +270,13 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
               autoCorrect={false}
             />
 
-            {tab === "saved" ? (
+            {tab !== "library" ? (
               <>
                 <Pressable style={styles.newButton} onPress={startCreate}>
                   <Ionicons name="add-outline" size={18} color="#fff" />
-                  <Text style={styles.newButtonText}>New prompt</Text>
+                  <Text style={styles.newButtonText}>
+                    New {tab === "jailbreak" ? "jailbreak" : "persona"}
+                  </Text>
                 </Pressable>
                 <FlatList
                   data={filteredSaved}
@@ -232,8 +285,10 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
                   contentContainerStyle={styles.list}
                   ListEmptyComponent={
                     <Text style={styles.empty}>
-                      {savedPrompts.length === 0
-                        ? "No saved prompts yet — create one, or save something from the Library."
+                      {savedForActiveTab.length === 0
+                        ? tab === "jailbreak"
+                          ? "No jailbreaks yet — create one, or move a persona over with the swap icon."
+                          : "No personas yet — create one, or save something from the Library."
                         : `No prompts match "${query}".`}
                     </Text>
                   }
@@ -277,6 +332,17 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
                       ) : (
                         <>
                           <Pressable
+                            onPress={() => moveKind(item)}
+                            style={styles.iconButton}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              item.kind === "persona" ? "Move to jailbreaks" : "Move to personas"
+                            }
+                          >
+                            <Ionicons name="swap-horizontal-outline" size={16} color={MUTED} />
+                          </Pressable>
+                          <Pressable
                             onPress={() => startEdit(item)}
                             style={styles.iconButton}
                             hitSlop={8}
@@ -305,48 +371,53 @@ export function PromptPickerModal({ visible, promptStore, onSelect, onClose }: P
             ) : libraryError ? (
               <Text style={styles.error}>{libraryError}</Text>
             ) : (
-              <FlatList
-                data={filteredLibrary}
-                keyExtractor={(e) => e.id}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={styles.list}
-                ListEmptyComponent={<Text style={styles.empty}>No prompts match "{query}".</Text>}
-                renderItem={({ item }) => {
-                  const alreadySaved = savedPromptKeys.has(promptKey(item.title, item.content));
-                  return (
-                    <View style={styles.row}>
-                      <Pressable
-                        style={styles.rowContent}
-                        onPress={() => {
-                          onSelect(item.content);
-                          onClose();
-                        }}
-                      >
-                        <Text style={styles.rowTitle} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        <Text style={styles.rowBody} numberOfLines={2}>
-                          {item.content}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => saveLibraryEntry(item)}
-                        style={styles.iconButton}
-                        hitSlop={8}
-                        disabled={alreadySaved}
-                        accessibilityRole="button"
-                        accessibilityLabel={alreadySaved ? "Already saved" : "Save to my prompts"}
-                      >
-                        <Ionicons
-                          name={alreadySaved ? "checkmark-outline" : "bookmark-outline"}
-                          size={16}
-                          color={alreadySaved ? ACCENT : MUTED}
-                        />
-                      </Pressable>
-                    </View>
-                  );
-                }}
-              />
+              <>
+                <Text style={styles.hint}>
+                  Saves land in {kind === "jailbreak" ? "Jailbreaks" : "Personas"} — the slot this picker opened for.
+                </Text>
+                <FlatList
+                  data={filteredLibrary}
+                  keyExtractor={(e) => e.id}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.list}
+                  ListEmptyComponent={<Text style={styles.empty}>No prompts match "{query}".</Text>}
+                  renderItem={({ item }) => {
+                    const alreadySaved = savedKeysForLibrary.has(promptKey(item.title, item.content, kind));
+                    return (
+                      <View style={styles.row}>
+                        <Pressable
+                          style={styles.rowContent}
+                          onPress={() => {
+                            onSelect(item.content);
+                            onClose();
+                          }}
+                        >
+                          <Text style={styles.rowTitle} numberOfLines={1}>
+                            {item.title}
+                          </Text>
+                          <Text style={styles.rowBody} numberOfLines={2}>
+                            {item.content}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => saveLibraryEntry(item)}
+                          style={styles.iconButton}
+                          hitSlop={8}
+                          disabled={alreadySaved}
+                          accessibilityRole="button"
+                          accessibilityLabel={alreadySaved ? "Already saved" : "Save to my prompts"}
+                        >
+                          <Ionicons
+                            name={alreadySaved ? "checkmark-outline" : "bookmark-outline"}
+                            size={16}
+                            color={alreadySaved ? ACCENT : MUTED}
+                          />
+                        </Pressable>
+                      </View>
+                    );
+                  }}
+                />
+              </>
             )}
           </>
         )}
@@ -397,6 +468,7 @@ const styles = StyleSheet.create({
   center: { marginTop: 40 },
   error: { color: ERROR, textAlign: "center", marginTop: 40, paddingHorizontal: 24 },
   empty: { color: MUTED, textAlign: "center", marginTop: 40, paddingHorizontal: 24 },
+  hint: { color: MUTED, fontSize: 12, paddingHorizontal: 16, paddingBottom: 8 },
   list: { paddingHorizontal: 16, gap: 6, paddingBottom: 24 },
   row: {
     flexDirection: "row",

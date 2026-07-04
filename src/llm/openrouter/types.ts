@@ -123,3 +123,28 @@ export class OpenRouterApiError extends Error {
     this.name = "OpenRouterApiError";
   }
 }
+
+/**
+ * Thrown when OpenRouter returns HTTP 200 but the assistant message has no
+ * usable text content — the "silent refusal" case. Providers hitting a
+ * content filter, upstream errors that OpenRouter forwards as an empty
+ * response, or a provider that streams zero tokens all land here. Without
+ * this, an empty string would slip through as a "successful" reply and the
+ * user would see a blank assistant bubble with no signal about why.
+ *
+ * `finishReason` is what OpenRouter reported ("content_filter", "length",
+ * "error", null, …) — surfaces the cause when the provider bothered to name
+ * one.
+ */
+export class OpenRouterEmptyResponseError extends Error {
+  constructor(
+    public readonly finishReason: string | null,
+    public readonly response: OpenRouterResponse,
+  ) {
+    const reason = finishReason ? ` (finish_reason: ${finishReason})` : "";
+    super(
+      `OpenRouter returned an empty response${reason}. The provider may have refused the request, hit a content filter, or errored out silently — try a different model or prompt.`,
+    );
+    this.name = "OpenRouterEmptyResponseError";
+  }
+}

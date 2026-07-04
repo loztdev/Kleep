@@ -102,6 +102,15 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE chat_sessions ADD COLUMN system_prompt TEXT;
     `,
   },
+  {
+    id: "0003_jailbreaks",
+    sql: `
+      ALTER TABLE saved_prompts ADD COLUMN kind TEXT NOT NULL DEFAULT 'persona';
+      CREATE INDEX IF NOT EXISTS idx_saved_prompts_kind ON saved_prompts(kind);
+
+      ALTER TABLE chat_sessions ADD COLUMN jailbreak_prompt TEXT;
+    `,
+  },
 ];
 
 /** Create the migrations table and apply any migration not yet recorded, in order. */

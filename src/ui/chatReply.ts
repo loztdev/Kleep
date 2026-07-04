@@ -28,17 +28,40 @@ export interface CacheSettings {
 export const DEFAULT_CACHE_SETTINGS: CacheSettings = { enabled: true };
 
 /**
+ * Compose the effective system message. When a jailbreak prompt is set it
+ * lands *first*, then the persona (or Kleep's built-in default) after a blank
+ * line. Order is deliberate: the JB establishes what's allowed, the persona
+ * only decides *how* the model sounds — a persona-last layout keeps the
+ * "permissions floor" from being reset by whatever the persona says. Empty/
+ * whitespace-only strings on either side degrade to the other alone (or the
+ * built-in persona when both are empty), so callers can pass `undefined` or
+ * `""` interchangeably.
+ */
+export function composeSystemPrompt(
+  jailbreakPrompt?: string,
+  systemPrompt?: string,
+): string {
+  const jb = jailbreakPrompt?.trim() ?? "";
+  const persona = systemPrompt?.trim() ?? "";
+  if (jb && persona) return `${jb}\n\n${persona}`;
+  if (jb) return jb;
+  return persona || DEFAULT_SYSTEM_PROMPT;
+}
+
+/**
  * Turn the live conversation into a reply from `provider`. `systemPrompt`
  * fully replaces Kleep's built-in persona when set (Tier 7.6) — a user
  * who deliberately picks/writes a system prompt wants that prompt, not
  * a personality blended with it — falling back to the default only
- * when no override is in effect for this chat.
+ * when no override is in effect for this chat. `jailbreakPrompt`, when
+ * present, is prepended in front of whichever of those two lands.
  */
 export async function generateReply(
   provider: LlmProvider,
   turns: readonly Turn[],
   systemPrompt?: string,
   cacheSettings: CacheSettings = DEFAULT_CACHE_SETTINGS,
+  jailbreakPrompt?: string,
 ): Promise<string> {
   const messages: LlmMessage[] = turns
     .filter((t): t is Turn & { role: typeof TurnRole.USER | typeof TurnRole.ASSISTANT } =>
@@ -48,7 +71,7 @@ export async function generateReply(
 
   const result = await provider.sendMessage({
     messages,
-    system: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    system: composeSystemPrompt(jailbreakPrompt, systemPrompt),
     maxTokens: 500,
     // `messages` grows every turn, so once the conversation crosses the
     // model's minimum cacheable token count, later turns get cheaper,

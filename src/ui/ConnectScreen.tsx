@@ -21,7 +21,7 @@ import {
 } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
 import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
-import type { PromptStore } from "../storage";
+import type { PromptStore, SavedPromptKind } from "../storage";
 import type { CacheSettings } from "./chatReply";
 import { ModelPickerModal } from "./ModelPickerModal";
 import { PromptPickerModal } from "./PromptPickerModal";
@@ -35,6 +35,7 @@ interface ConnectScreenProps {
     model?: string,
     defaultSystemPrompt?: string,
     cacheSettings?: CacheSettings,
+    defaultJailbreakPrompt?: string,
   ) => void;
 }
 
@@ -69,10 +70,13 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [jailbreakPrompt, setJailbreakPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
-  const [promptPickerVisible, setPromptPickerVisible] = useState(false);
+  // Same modal instance, one kind at a time — persona icon opens it in
+  // `persona` mode, jailbreak icon in `jailbreak` mode. `null` hides it.
+  const [promptPickerKind, setPromptPickerKind] = useState<SavedPromptKind | null>(null);
   const [cacheEnabled, setCacheEnabled] = useState(true);
   const [cacheTtl, setCacheTtl] = useState<"5m" | "1h">("5m");
   const [responseCacheEnabled, setResponseCacheEnabled] = useState(false);
@@ -89,6 +93,7 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
     try {
       const trimmedModel = model.trim();
       const trimmedSystemPrompt = systemPrompt.trim();
+      const trimmedJailbreakPrompt = jailbreakPrompt.trim();
       const provider = buildLlmProvider({ kind, apiKey: trimmedKey, ...(trimmedModel ? { model: trimmedModel } : {}) });
       await saveApiKey(kind, trimmedKey);
       await saveActiveProvider(kind);
@@ -98,7 +103,14 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
         // Response caching is an OpenRouter-only feature — see CacheSettings' doc.
         ...(kind === "openrouter" && responseCacheEnabled ? { responseCacheTtlSeconds: responseCacheSeconds } : {}),
       };
-      onConnected(provider, kind, trimmedModel || undefined, trimmedSystemPrompt || undefined, cacheSettings);
+      onConnected(
+        provider,
+        kind,
+        trimmedModel || undefined,
+        trimmedSystemPrompt || undefined,
+        cacheSettings,
+        trimmedJailbreakPrompt || undefined,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect — check the key and try again.");
     } finally {
@@ -179,10 +191,34 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
           />
           <Pressable
             style={styles.browseButton}
-            onPress={() => setPromptPickerVisible(true)}
+            onPress={() => setPromptPickerKind("persona")}
             disabled={connecting}
             accessibilityRole="button"
             accessibilityLabel="Browse system prompts"
+          >
+            <Text style={styles.browseButtonText}>Browse</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.modelRow}>
+          <TextInput
+            style={[styles.input, styles.modelInput, styles.systemPromptInput]}
+            placeholder="Default jailbreak prompt (optional, prepended before persona)"
+            placeholderTextColor={MUTED}
+            value={jailbreakPrompt}
+            onChangeText={setJailbreakPrompt}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            textAlignVertical="top"
+            editable={!connecting}
+          />
+          <Pressable
+            style={styles.browseButton}
+            onPress={() => setPromptPickerKind("jailbreak")}
+            disabled={connecting}
+            accessibilityRole="button"
+            accessibilityLabel="Browse jailbreak prompts"
           >
             <Text style={styles.browseButtonText}>Browse</Text>
           </Pressable>
@@ -262,10 +298,11 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
           onClose={() => setPickerVisible(false)}
         />
         <PromptPickerModal
-          visible={promptPickerVisible}
+          visible={promptPickerKind !== null}
+          kind={promptPickerKind ?? "persona"}
           promptStore={promptStore}
-          onSelect={setSystemPrompt}
-          onClose={() => setPromptPickerVisible(false)}
+          onSelect={promptPickerKind === "jailbreak" ? setJailbreakPrompt : setSystemPrompt}
+          onClose={() => setPromptPickerKind(null)}
         />
       </ScrollView>
     </KeyboardAvoidingView>
