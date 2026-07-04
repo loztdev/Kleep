@@ -80,6 +80,26 @@ describe("ClaudeClient.sendMessage", () => {
     expect(transport.sendCalls[0]).toMatchObject({ model: "claude-haiku-4-5", max_tokens: 222 });
   });
 
+  it("substitutes a high fallback when maxTokens is 0 (the app's `unlimited` sentinel — Anthropic requires max_tokens)", async () => {
+    const transport = new StubTransport(async () => textMessage("hello"));
+    const client = new ClaudeClient({ transport, defaultModel: "claude-opus-4-7" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], maxTokens: 0 });
+
+    // Should be a large integer, not 0 (which the API rejects) and not the
+    // client's defaultMaxTokens (which would be aggressively short).
+    expect(transport.sendCalls[0]?.max_tokens).toBeGreaterThanOrEqual(16000);
+  });
+
+  it("passes a positive maxTokens through verbatim", async () => {
+    const transport = new StubTransport(async () => textMessage("hello"));
+    const client = new ClaudeClient({ transport, defaultModel: "claude-opus-4-7" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], maxTokens: 65536 });
+
+    expect(transport.sendCalls[0]?.max_tokens).toBe(65536);
+  });
+
   it("omits cache_control by default, and sets it when `cache: true` is requested", async () => {
     const transport = new StubTransport(async () => textMessage("hello"));
     const client = new ClaudeClient({ transport });

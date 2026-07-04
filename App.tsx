@@ -8,6 +8,7 @@ import {
   loadActiveModel,
   loadActiveProvider,
   loadApiKey,
+  loadOutputMaxTokens,
 } from "./src/llm/secureKeyStore";
 import {
   ChatSessionStore,
@@ -126,12 +127,28 @@ export default function App() {
         // (plus the ChatScreen mismatch-check for existing chats) reads
         // "provider default," stripping the stored model along the way.
         const model = kind ? await loadActiveModel(kind) : null;
+        // Load the saved output-token preference too — on autoreconnect we
+        // want the same length ceiling the user last set, not the built-in
+        // default. `null` means "never set," so we fall through to whatever
+        // `buildConnectedContext` defaults to.
+        const maxOutputTokens = await loadOutputMaxTokens();
         if (cancelled) return;
         if (kind && apiKey) {
           const provider = buildLlmProvider({ kind, apiKey, ...(model ? { model } : {}) });
+          const cacheSettings: CacheSettings | undefined =
+            maxOutputTokens !== null ? { enabled: true, maxOutputTokens } : undefined;
           setState(
             initialConnectedState(
-              buildConnectedContext(db, promptStore, skillStore, provider, kind, model ?? undefined),
+              buildConnectedContext(
+                db,
+                promptStore,
+                skillStore,
+                provider,
+                kind,
+                model ?? undefined,
+                undefined,
+                cacheSettings,
+              ),
             ),
           );
         } else {
