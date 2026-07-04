@@ -188,7 +188,6 @@ function EntityDetailModal({
   onDelete: () => void;
 }) {
   const [whyBundle, setWhyBundle] = useState<ProvenanceBundle | null>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -206,19 +205,11 @@ function EntityDetailModal({
           {entry.aliases.length ? (
             <Text style={styles.detailMeta}>aka {entry.aliases.join(", ")}</Text>
           ) : null}
-          <View style={styles.detailActionsRow}>
-            <Pressable style={styles.whyButton} onPress={() => setWhyBundle(explain(entry))}>
-              <Ionicons name="information-circle-outline" size={16} color={ACCENT} />
-              <Text style={styles.whyButtonText}>Why do I know this?</Text>
-            </Pressable>
-            <DeleteMemoryButton
-              confirming={confirmingDelete}
-              onArm={() => setConfirmingDelete(true)}
-              onCancel={() => setConfirmingDelete(false)}
-              onConfirm={onDelete}
-              accessibilityLabelIdle="Delete this entity"
-            />
-          </View>
+          <DetailActionsRow
+            onWhy={() => setWhyBundle(explain(entry))}
+            onDelete={onDelete}
+            deleteLabel="Delete this entity"
+          />
           {entry.summary ? <Text style={styles.detailSummary}>{entry.summary}</Text> : null}
 
           <Text style={styles.sectionTitle}>Attributes</Text>
@@ -260,7 +251,6 @@ function LoreDetailModal({
   onDelete: () => void;
 }) {
   const [whyBundle, setWhyBundle] = useState<ProvenanceBundle | null>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -281,19 +271,11 @@ function LoreDetailModal({
           {snippet.tags.length ? (
             <Text style={styles.detailMeta}>tags: {snippet.tags.join(", ")}</Text>
           ) : null}
-          <View style={styles.detailActionsRow}>
-            <Pressable style={styles.whyButton} onPress={() => setWhyBundle(explain(snippet))}>
-              <Ionicons name="information-circle-outline" size={16} color={ACCENT} />
-              <Text style={styles.whyButtonText}>Why do I know this?</Text>
-            </Pressable>
-            <DeleteMemoryButton
-              confirming={confirmingDelete}
-              onArm={() => setConfirmingDelete(true)}
-              onCancel={() => setConfirmingDelete(false)}
-              onConfirm={onDelete}
-              accessibilityLabelIdle="Delete this lore snippet"
-            />
-          </View>
+          <DetailActionsRow
+            onWhy={() => setWhyBundle(explain(snippet))}
+            onDelete={onDelete}
+            deleteLabel="Delete this lore snippet"
+          />
           <Text style={styles.detailSummary}>{snippet.content}</Text>
         </ScrollView>
       </View>
@@ -302,11 +284,43 @@ function LoreDetailModal({
   );
 }
 
-/** Two-tap delete affordance shared by both detail modals. Tap once to arm
- * (icon flips to a red checkmark + a cancel X appears next to it), tap the
- * checkmark to fire. Same pattern as the wipe-history button on ChatScreen —
- * a single-button destructive action doesn't need a full confirmation modal
- * when a second tap is the confirmation. */
+/** The "Why do I know this?" + delete pair that both detail modals surface.
+ * Extracted so the two modals share one implementation of the layout AND the
+ * "arm-then-confirm" state — earlier revisions kept the confirm state up in
+ * the parent modal, which meant both modals had to duplicate the same three
+ * hooks and props to wire it up. */
+function DetailActionsRow({
+  onWhy,
+  onDelete,
+  deleteLabel,
+}: {
+  onWhy: () => void;
+  onDelete: () => void;
+  deleteLabel: string;
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  return (
+    <View style={styles.detailActionsRow}>
+      <Pressable style={styles.whyButton} onPress={onWhy}>
+        <Ionicons name="information-circle-outline" size={16} color={ACCENT} />
+        <Text style={styles.whyButtonText}>Why do I know this?</Text>
+      </Pressable>
+      <DeleteMemoryButton
+        confirming={confirmingDelete}
+        onArm={() => setConfirmingDelete(true)}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={onDelete}
+        accessibilityLabelIdle={deleteLabel}
+      />
+    </View>
+  );
+}
+
+/** Two-tap delete affordance. Tap once to arm (icon flips to a red checkmark
+ * + a cancel X appears next to it), tap the checkmark to fire. Same pattern
+ * as the wipe-history button on ChatScreen — a single-button destructive
+ * action doesn't need a full confirmation modal when a second tap is the
+ * confirmation. Now called only through `DetailActionsRow`. */
 function DeleteMemoryButton({
   confirming,
   onArm,
