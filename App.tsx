@@ -2,7 +2,13 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "./src/llm";
-import { clearApiKey, loadActiveProvider, loadApiKey } from "./src/llm/secureKeyStore";
+import {
+  clearActiveModel,
+  clearApiKey,
+  loadActiveModel,
+  loadActiveProvider,
+  loadApiKey,
+} from "./src/llm/secureKeyStore";
 import {
   ChatSessionStore,
   InMemoryPromptStore,
@@ -114,10 +120,20 @@ export default function App() {
       try {
         const kind = await loadActiveProvider();
         const apiKey = kind ? await loadApiKey(kind) : null;
+        // Load the stored model too so an auto-reconnect uses the same
+        // one the last session did — without this, reopening the app
+        // silently drops the user's model choice and every new chat
+        // (plus the ChatScreen mismatch-check for existing chats) reads
+        // "provider default," stripping the stored model along the way.
+        const model = kind ? await loadActiveModel(kind) : null;
         if (cancelled) return;
         if (kind && apiKey) {
-          const provider = buildLlmProvider({ kind, apiKey });
-          setState(initialConnectedState(buildConnectedContext(db, promptStore, skillStore, provider, kind)));
+          const provider = buildLlmProvider({ kind, apiKey, ...(model ? { model } : {}) });
+          setState(
+            initialConnectedState(
+              buildConnectedContext(db, promptStore, skillStore, provider, kind, model ?? undefined),
+            ),
+          );
         } else {
           setState({ status: "disconnected" });
         }
@@ -133,13 +149,18 @@ export default function App() {
   }, []);
 
   const handleDisconnect = useCallback(() => {
-    // Fire-and-forget: the UI shouldn't wait on SecureStore to clear. Only
-    // the saved API key/provider choice is cleared — the on-device memory
-    // (chats, world bible, lore) is untouched; reconnecting picks it back
-    // up, same as it would with any other provider.
+    // Fire-and-forget: the UI shouldn't wait on SecureStore to clear. The
+    // saved API key + model choice are cleared for the disconnected provider
+    // (so a "wrong key" flow can retype without seeing the stale model
+    // pre-filled from the previous connection); the on-device memory (chats,
+    // world bible, lore) is untouched — reconnecting picks it back up, same
+    // as it would with any other provider.
     loadActiveProvider()
-      .then((kind) => kind && clearApiKey(kind))
-      .catch((err) => console.warn("Failed to clear stored API key:", err));
+      .then((kind) => {
+        if (!kind) return;
+        return Promise.all([clearApiKey(kind), clearActiveModel(kind)]);
+      })
+      .catch((err) => console.warn("Failed to clear stored credentials:", err));
     setState({ status: "disconnected" });
   }, []);
 

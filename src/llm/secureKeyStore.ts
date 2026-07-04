@@ -36,6 +36,14 @@ function apiKeyStorageKey(provider: LlmProviderKind): string {
   return `kleep.llm_api_key.${provider}`;
 }
 
+// Model isn't a secret and doesn't need the platform keychain — but sharing
+// SecureStore for the small set of per-provider preferences keeps the "which
+// storage backend does this app use" story simple: same load path clears
+// on uninstall, same no-op fallback on web, no second dependency added.
+function modelStorageKey(provider: LlmProviderKind): string {
+  return `kleep.llm_active_model.${provider}`;
+}
+
 /** Persist an API key for `provider` in the platform keychain/keystore. No-op on web — see module doc. */
 export async function saveApiKey(provider: LlmProviderKind, apiKey: string): Promise<void> {
   if (IS_WEB) return;
@@ -65,4 +73,28 @@ export async function loadActiveProvider(): Promise<LlmProviderKind | null> {
   if (IS_WEB) return null;
   const value = await SecureStore.getItemAsync(ACTIVE_PROVIDER_KEY);
   return value === "claude" || value === "openrouter" ? value : null;
+}
+
+/** Remember the user's most recent model choice for `provider`, so the app can
+ * pre-fill it and auto-reconnect with it next launch. Empty string clears. */
+export async function saveActiveModel(provider: LlmProviderKind, model: string): Promise<void> {
+  if (IS_WEB) return;
+  const trimmed = model.trim();
+  if (trimmed.length === 0) {
+    await SecureStore.deleteItemAsync(modelStorageKey(provider));
+    return;
+  }
+  await SecureStore.setItemAsync(modelStorageKey(provider), trimmed);
+}
+
+/** Read back the stored model for `provider`, or `null` if none has been saved (always `null` on web). */
+export async function loadActiveModel(provider: LlmProviderKind): Promise<string | null> {
+  if (IS_WEB) return null;
+  return SecureStore.getItemAsync(modelStorageKey(provider));
+}
+
+/** Remove the stored model for `provider`. No-op on web. */
+export async function clearActiveModel(provider: LlmProviderKind): Promise<void> {
+  if (IS_WEB) return;
+  await SecureStore.deleteItemAsync(modelStorageKey(provider));
 }

@@ -6,7 +6,7 @@
  */
 
 import Slider from "@react-native-community/slider";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -20,7 +20,7 @@ import {
   View,
 } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
-import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
+import { loadActiveModel, saveActiveModel, saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
 import type { PromptStore, SavedPromptKind } from "../storage";
 import type { CacheSettings } from "./chatReply";
 import { ModelPickerModal } from "./ModelPickerModal";
@@ -82,6 +82,43 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   const [responseCacheEnabled, setResponseCacheEnabled] = useState(false);
   const [responseCacheSeconds, setResponseCacheSeconds] = useState(DEFAULT_RESPONSE_CACHE_SECONDS);
 
+  // Track whether the current model value came from `loadActiveModel` or
+  // from a user keystroke. On a provider-kind change we want to *replace*
+  // an auto-filled value with the new provider's saved model (so switching
+  // from OpenRouter → Claude doesn't leave "z-ai/glm-5.2" pre-filled and
+  // then quietly save it as Claude's model on Connect), but we want to
+  // *preserve* whatever the user typed on their own even if it doesn't
+  // match either provider's saved value.
+  const modelSource = useRef<"autofill" | "user">("autofill");
+  const setModelFromUser = (value: string) => {
+    modelSource.current = "user";
+    setModel(value);
+  };
+
+  // Pre-fill the model input whenever the provider selector changes. Replaces
+  // an empty or previously auto-filled value with the newly selected
+  // provider's saved model; leaves a user-typed value alone. Failures
+  // (SecureStore unavailable, web, no saved value) fall through silently.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await loadActiveModel(kind);
+        if (cancelled) return;
+        if (modelSource.current !== "user") {
+          setModel(saved ?? "");
+          modelSource.current = "autofill";
+        }
+      } catch (err) {
+        console.warn("loadActiveModel failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
+
   const handleConnect = async () => {
     const trimmedKey = apiKey.trim();
     if (!trimmedKey) {
@@ -97,6 +134,10 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
       const provider = buildLlmProvider({ kind, apiKey: trimmedKey, ...(trimmedModel ? { model: trimmedModel } : {}) });
       await saveApiKey(kind, trimmedKey);
       await saveActiveProvider(kind);
+      // Empty model deliberately clears — the user typing nothing means
+      // "use whichever default the provider ships with," which shouldn't
+      // resurrect an old saved value on next launch.
+      await saveActiveModel(kind, trimmedModel);
       const cacheSettings: CacheSettings = {
         enabled: cacheEnabled,
         ttl: cacheTtl,
@@ -163,7 +204,7 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
             placeholder="Model override (optional)"
             placeholderTextColor={MUTED}
             value={model}
-            onChangeText={setModel}
+            onChangeText={setModelFromUser}
             autoCapitalize="none"
             autoCorrect={false}
             editable={!connecting}
@@ -297,7 +338,7 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
           visible={pickerVisible}
           kind={kind}
           apiKey={apiKey}
-          onSelect={setModel}
+          onSelect={setModelFromUser}
           onClose={() => setPickerVisible(false)}
         />
         <PromptPickerModal
