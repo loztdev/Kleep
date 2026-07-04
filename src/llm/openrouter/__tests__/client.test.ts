@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { OpenRouterClient, StructuredOutputError } from "../client";
-import { OpenRouterApiError } from "../types";
+import { OpenRouterApiError, OpenRouterEmptyResponseError } from "../types";
 import type {
   OpenRouterMessageStream,
   OpenRouterRequest,
@@ -195,6 +195,32 @@ describe("OpenRouterClient.sendMessage", () => {
 
     await expect(client.sendMessage({ messages: [{ role: "user", content: "hi" }] })).rejects.toThrow(OpenRouterApiError);
     expect(transport.calls).toHaveLength(1);
+  });
+
+  it("throws OpenRouterEmptyResponseError when the assistant message has null content", async () => {
+    const transport = new StubTransport(async () => ({
+      id: "gen_1",
+      model: "anthropic/claude-fable-5",
+      choices: [{ index: 0, message: { role: "assistant", content: null }, finish_reason: "content_filter" }],
+      usage: { prompt_tokens: 5, completion_tokens: 0, total_tokens: 5 },
+    }));
+    const client = new OpenRouterClient({ transport, defaultModel: "anthropic/claude-fable-5" });
+
+    await expect(
+      client.sendMessage({ messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(OpenRouterEmptyResponseError);
+    await expect(
+      client.sendMessage({ messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/content_filter/);
+  });
+
+  it("throws OpenRouterEmptyResponseError when content is an empty string too", async () => {
+    const transport = new StubTransport(async () => textResponse(""));
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await expect(
+      client.sendMessage({ messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(OpenRouterEmptyResponseError);
   });
 });
 

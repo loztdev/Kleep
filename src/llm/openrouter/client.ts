@@ -28,14 +28,15 @@ import type {
 import { zodToToolInputSchema } from "../zodToJsonSchema";
 import { RealOpenRouterTransport, type RealOpenRouterTransportOptions } from "./realTransport";
 import { type ResolvedRetryOptions, type RetryOptions, resolveRetryOptions, withRetry } from "./retry";
-import type {
-  OpenRouterCacheControl,
-  OpenRouterMessage,
-  OpenRouterRequest,
-  OpenRouterRequestOptions,
-  OpenRouterResponse,
-  OpenRouterTool,
-  OpenRouterTransport,
+import {
+  OpenRouterEmptyResponseError,
+  type OpenRouterCacheControl,
+  type OpenRouterMessage,
+  type OpenRouterRequest,
+  type OpenRouterRequestOptions,
+  type OpenRouterResponse,
+  type OpenRouterTool,
+  type OpenRouterTransport,
 } from "./types";
 
 /** Construction options for `OpenRouterClient`. */
@@ -242,8 +243,16 @@ function withCacheControl(message: OpenRouterMessage, cacheControl: OpenRouterCa
 
 function toTextResult(response: OpenRouterResponse): LlmTextResult {
   const usage = response.usage;
+  const choice = response.choices[0];
+  const content = choice?.message.content ?? null;
+  // Empty/null content on HTTP 200 = "silent refusal" — see
+  // `OpenRouterEmptyResponseError`'s doc for why we throw here instead of
+  // returning "" and letting the chat surface an invisible assistant bubble.
+  if (!content) {
+    throw new OpenRouterEmptyResponseError(choice?.finish_reason ?? null, response);
+  }
   return {
-    text: response.choices[0]?.message.content ?? "",
+    text: content,
     model: response.model,
     usage: { inputTokens: usage?.prompt_tokens ?? 0, outputTokens: usage?.completion_tokens ?? 0 },
   };

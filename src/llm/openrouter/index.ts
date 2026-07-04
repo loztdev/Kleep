@@ -17,4 +17,4 @@ export type {
   OpenRouterToolChoice,
   OpenRouterTransport,
 } from "./types";
-export { OpenRouterApiError } from "./types";
+export { OpenRouterApiError, OpenRouterEmptyResponseError } from "./types";
