@@ -62,6 +62,7 @@ function toClaudeSendOptions(opts: LlmSendOptions): {
   model?: string;
   maxTokens?: number;
   cache?: boolean;
+  cacheTtl?: "5m" | "1h";
 } {
   return {
     messages: opts.messages.map(toClaudeMessageParam),
@@ -69,6 +70,7 @@ function toClaudeSendOptions(opts: LlmSendOptions): {
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
     ...(opts.cache !== undefined ? { cache: opts.cache } : {}),
+    ...(opts.cacheTtl !== undefined ? { cacheTtl: opts.cacheTtl } : {}),
   };
 }
 

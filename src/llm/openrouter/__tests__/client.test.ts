@@ -4,6 +4,7 @@ import { OpenRouterApiError } from "../types";
 import type {
   OpenRouterMessageStream,
   OpenRouterRequest,
+  OpenRouterRequestOptions,
   OpenRouterResponse,
   OpenRouterStreamChunk,
   OpenRouterTransport,
@@ -37,9 +38,11 @@ function toolCallResponse(name: string, args: unknown): OpenRouterResponse {
 
 class StubTransport implements OpenRouterTransport {
   calls: OpenRouterRequest[] = [];
+  optsCalls: Array<OpenRouterRequestOptions | undefined> = [];
   constructor(private readonly impl: (req: OpenRouterRequest) => Promise<OpenRouterResponse>) {}
-  send(req: OpenRouterRequest): Promise<OpenRouterResponse> {
+  send(req: OpenRouterRequest, opts?: OpenRouterRequestOptions): Promise<OpenRouterResponse> {
     this.calls.push(req);
+    this.optsCalls.push(opts);
     return this.impl(req);
   }
   stream(): OpenRouterMessageStream {
@@ -84,6 +87,65 @@ describe("OpenRouterClient.sendMessage", () => {
     const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
 
     await client.sendMessage({ messages: [{ role: "user", content: "hi" }], system: "be terse" });
+  });
+
+  it("omits cache_control by default", async () => {
+    const transport = new StubTransport(async (req) => {
+      expect(req.messages[0]).toEqual({ role: "user", content: "hi" });
+      return textResponse("ok");
+    });
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }] });
+  });
+
+  it("attaches cache_control to the system message and the newest message when `cache: true`", async () => {
+    const transport = new StubTransport(async (req) => {
+      expect(req.messages[0]).toEqual({
+        role: "system",
+        content: [{ type: "text", text: "be terse", cache_control: { type: "ephemeral" } }],
+      });
+      expect(req.messages[1]).toEqual({ role: "user", content: "turn one" });
+      expect(req.messages[2]).toEqual({
+        role: "user",
+        content: [{ type: "text", text: "turn two", cache_control: { type: "ephemeral" } }],
+      });
+      return textResponse("ok");
+    });
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await client.sendMessage({
+      messages: [
+        { role: "user", content: "turn one" },
+        { role: "user", content: "turn two" },
+      ],
+      system: "be terse",
+      cache: true,
+    });
+  });
+
+  it("passes cacheTtl through to cache_control.ttl", async () => {
+    const transport = new StubTransport(async (req) => {
+      expect(req.messages[0]).toEqual({
+        role: "user",
+        content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral", ttl: "1h" } }],
+      });
+      return textResponse("ok");
+    });
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], cache: true, cacheTtl: "1h" });
+  });
+
+  it("forwards responseCacheTtlSeconds to the transport as request options, omitting it by default", async () => {
+    const transport = new StubTransport(async () => textResponse("ok"));
+    const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }] });
+    expect(transport.optsCalls[0]?.responseCacheTtlSeconds).toBeUndefined();
+
+    await client.sendMessage({ messages: [{ role: "user", content: "hi" }], responseCacheTtlSeconds: 60 });
+    expect(transport.optsCalls[1]?.responseCacheTtlSeconds).toBe(60);
   });
 
   it("retries on 429 with backoff, then succeeds", async () => {

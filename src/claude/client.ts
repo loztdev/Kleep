@@ -59,6 +59,8 @@ export interface SendMessageOptions {
    * and gain nothing from it.
    */
   cache?: boolean;
+  /** TTL for the cache breakpoint set by `cache`. Ignored if `cache` is falsy. Anthropic defaults to `"5m"` when omitted. */
+  cacheTtl?: "5m" | "1h";
 }
 
 /** Options for `ClaudeClient.structured` — a single named tool the model is forced to call. */
@@ -242,7 +244,9 @@ export class ClaudeClient {
       ...(opts.system !== undefined ? { system: opts.system } : {}),
       ...(opts.tools !== undefined ? { tools: [...opts.tools] } : {}),
       ...(opts.toolChoice !== undefined ? { tool_choice: opts.toolChoice } : {}),
-      ...(opts.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+      ...(opts.cache
+        ? { cache_control: { type: "ephemeral" as const, ...(opts.cacheTtl ? { ttl: opts.cacheTtl } : {}) } }
+        : {}),
     };
   }
 }

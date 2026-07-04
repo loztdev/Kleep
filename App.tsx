@@ -17,6 +17,7 @@ import {
 } from "./src/storage";
 import type { SqlDatabase } from "./src/storage/sql/types";
 import { openKleepDatabase } from "./src/storage/sql/openKleepDatabase";
+import { DEFAULT_CACHE_SETTINGS, type CacheSettings } from "./src/ui/chatReply";
 import { ChatListScreen } from "./src/ui/ChatListScreen";
 import { ChatScreen } from "./src/ui/ChatScreen";
 import { ConnectScreen } from "./src/ui/ConnectScreen";
@@ -39,6 +40,7 @@ interface ConnectedContext {
   providerKind: LlmProviderKind;
   model?: string;
   defaultSystemPrompt?: string;
+  cacheSettings: CacheSettings;
   structured: StructuredStore;
   vector: VectorStore;
   promptStore: PromptStore;
@@ -59,12 +61,14 @@ function buildConnectedContext(
   providerKind: LlmProviderKind,
   model?: string,
   defaultSystemPrompt?: string,
+  cacheSettings: CacheSettings = DEFAULT_CACHE_SETTINGS,
 ): ConnectedContext {
   return {
     provider,
     providerKind,
     ...(model ? { model } : {}),
     ...(defaultSystemPrompt ? { defaultSystemPrompt } : {}),
+    cacheSettings,
     structured: db ? new SqliteStructuredStore(db) : new InMemoryStructuredStore(),
     vector: db ? new SqliteVectorStore(db) : new InMemoryVectorStore(),
     promptStore,
@@ -123,10 +127,16 @@ export default function App() {
   }, []);
 
   const handleConnected = useCallback(
-    (provider: LlmProvider, kind: LlmProviderKind, model?: string, defaultSystemPrompt?: string) => {
+    (
+      provider: LlmProvider,
+      kind: LlmProviderKind,
+      model?: string,
+      defaultSystemPrompt?: string,
+      cacheSettings?: CacheSettings,
+    ) => {
       setState(
         initialConnectedState(
-          buildConnectedContext(db, promptStore, provider, kind, model, defaultSystemPrompt),
+          buildConnectedContext(db, promptStore, provider, kind, model, defaultSystemPrompt, cacheSettings),
         ),
       );
     },
@@ -185,6 +195,7 @@ export default function App() {
         vector={state.ctx.vector}
         promptStore={state.ctx.promptStore}
         defaultSystemPrompt={state.ctx.defaultSystemPrompt}
+        cacheSettings={state.ctx.cacheSettings}
         sessionId={state.sessionId}
         sessionStore={state.ctx.sessionStore}
         onDisconnect={handleDisconnect}

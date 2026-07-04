@@ -29,8 +29,10 @@ import { zodToToolInputSchema } from "../zodToJsonSchema";
 import { RealOpenRouterTransport, type RealOpenRouterTransportOptions } from "./realTransport";
 import { type ResolvedRetryOptions, type RetryOptions, resolveRetryOptions, withRetry } from "./retry";
 import type {
+  OpenRouterCacheControl,
   OpenRouterMessage,
   OpenRouterRequest,
+  OpenRouterRequestOptions,
   OpenRouterResponse,
   OpenRouterTool,
   OpenRouterTransport,
@@ -105,7 +107,8 @@ export class OpenRouterClient implements LlmProvider {
 
   async sendMessage(opts: LlmSendOptions): Promise<LlmTextResult> {
     const request = this.buildRequest(opts);
-    const response = await withRetry(() => this.transport.send(request), this.retryOptions);
+    const requestOptions = buildRequestOptions(opts);
+    const response = await withRetry(() => this.transport.send(request, requestOptions), this.retryOptions);
     this.recordCost(response);
     return toTextResult(response);
   }
@@ -121,8 +124,9 @@ export class OpenRouterClient implements LlmProvider {
       tools: [tool],
       tool_choice: { type: "function", function: { name: opts.tool.name } },
     };
+    const requestOptions = buildRequestOptions(opts);
 
-    const response = await withRetry(() => this.transport.send(request), this.retryOptions);
+    const response = await withRetry(() => this.transport.send(request, requestOptions), this.retryOptions);
     this.recordCost(response);
 
     const call = response.choices[0]?.message.tool_calls?.find((c) => c.function.name === opts.tool.name);
@@ -151,7 +155,7 @@ export class OpenRouterClient implements LlmProvider {
 
   streamMessage(opts: LlmSendOptions): LlmStreamHandle {
     const request = this.buildRequest(opts);
-    const stream = this.transport.stream(request);
+    const stream = this.transport.stream(request, buildRequestOptions(opts));
 
     async function* chunks(): AsyncGenerator<LlmStreamChunk, void, void> {
       for await (const chunk of stream) {
@@ -177,9 +181,28 @@ export class OpenRouterClient implements LlmProvider {
     if (!model) {
       throw new Error("OpenRouterClient: no model specified — pass `model` per call or `defaultModel` at construction");
     }
+    // OpenRouter has no single-field "automatic" cache_control the way Anthropic's
+    // own API does — the breakpoint has to be placed on a specific content block.
+    // Marking the system message (the static prefix) and the newest message (so
+    // the boundary advances as the conversation grows) reproduces that same
+    // "cache everything so far" effect with the block-level mechanism OpenRouter
+    // actually supports. Models/providers that don't understand `cache_control`
+    // just ignore the field.
+    const cacheControl: OpenRouterCacheControl | undefined = opts.cache
+      ? { type: "ephemeral", ...(opts.cacheTtl ? { ttl: opts.cacheTtl } : {}) }
+      : undefined;
+
+    const conversationMessages = opts.messages.map(toOpenRouterMessage);
+    const lastIndex = conversationMessages.length - 1;
+    if (cacheControl && lastIndex >= 0) {
+      conversationMessages[lastIndex] = withCacheControl(conversationMessages[lastIndex]!, cacheControl);
+    }
+
     const messages: OpenRouterMessage[] = [
-      ...(opts.system !== undefined ? [{ role: "system" as const, content: opts.system }] : []),
-      ...opts.messages.map(toOpenRouterMessage),
+      ...(opts.system !== undefined
+        ? [withCacheControl({ role: "system" as const, content: opts.system }, cacheControl)]
+        : []),
+      ...conversationMessages,
     ];
     return {
       model,
@@ -202,6 +225,19 @@ export class OpenRouterClient implements LlmProvider {
 
 function toOpenRouterMessage(message: LlmMessage): OpenRouterMessage {
   return { role: message.role, content: message.content };
+}
+
+function buildRequestOptions(opts: LlmSendOptions): OpenRouterRequestOptions {
+  return {
+    ...(opts.responseCacheTtlSeconds !== undefined ? { responseCacheTtlSeconds: opts.responseCacheTtlSeconds } : {}),
+  };
+}
+
+/** Switches a message's content to the block-array form `cache_control` requires. No-op when `cacheControl` is undefined. */
+function withCacheControl(message: OpenRouterMessage, cacheControl: OpenRouterCacheControl | undefined): OpenRouterMessage {
+  if (!cacheControl) return message;
+  const text = typeof message.content === "string" ? message.content : message.content.map((b) => b.text).join("");
+  return { ...message, content: [{ type: "text", text, cache_control: cacheControl }] };
 }
 
 function toTextResult(response: OpenRouterResponse): LlmTextResult {
