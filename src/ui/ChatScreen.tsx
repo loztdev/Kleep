@@ -42,11 +42,19 @@ import {
 import { ConversationBuffer, TurnRole, type Turn } from "../conversation";
 import type { LlmProvider, LlmProviderKind } from "../llm";
 import { newId } from "../schema";
-import type { ChatSessionStore, PromptStore, SavedPromptKind, StructuredStore, VectorStore } from "../storage";
+import type {
+  ChatSessionStore,
+  PromptStore,
+  SavedPromptKind,
+  SkillStore,
+  StructuredStore,
+  VectorStore,
+} from "../storage";
 import { DEFAULT_CACHE_SETTINGS, generateReply, type CacheSettings } from "./chatReply";
 import { friendlyErrorMessage } from "./friendlyError";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
 import { PromptPickerModal } from "./PromptPickerModal";
+import { SkillPickerModal } from "./SkillPickerModal";
 import { ACCENT, BG, BORDER, ERROR, MUTED, SURFACE, TEXT } from "./theme";
 
 interface ChatScreenProps {
@@ -56,6 +64,7 @@ interface ChatScreenProps {
   structured: StructuredStore;
   vector: VectorStore;
   promptStore: PromptStore;
+  skillStore: SkillStore;
   /** Seeds a brand-new/ephemeral chat's system prompt; ignored once a session has its own stored value. */
   defaultSystemPrompt?: string;
   /** Seeds a brand-new/ephemeral chat's jailbreak prompt; same "ignored once stored" rule as `defaultSystemPrompt`. */
@@ -78,6 +87,7 @@ export function ChatScreen({
   structured,
   vector,
   promptStore,
+  skillStore,
   defaultSystemPrompt,
   defaultJailbreakPrompt,
   cacheSettings = DEFAULT_CACHE_SETTINGS,
@@ -87,7 +97,8 @@ export function ChatScreen({
   onOpenMemory,
   onBack,
 }: ChatScreenProps) {
-  const { engine, providerMismatch, initialSystemPrompt, initialJailbreakPrompt } = useMemo(() => {
+  const { engine, providerMismatch, initialSystemPrompt, initialJailbreakPrompt, initialActiveSkillIds } =
+    useMemo(() => {
     const buffer =
       sessionId && sessionStore
         ? (() => {
@@ -107,11 +118,13 @@ export function ChatScreen({
     let mismatch = false;
     let systemPrompt = defaultSystemPrompt;
     let jailbreakPrompt = defaultJailbreakPrompt;
+    let activeSkillIds: readonly string[] = [];
     if (sessionId && sessionStore) {
       const meta = sessionStore.getSession(sessionId);
       if (meta) {
         systemPrompt = meta.systemPrompt;
         jailbreakPrompt = meta.jailbreakPrompt;
+        activeSkillIds = meta.activeSkillIds ?? [];
         if (meta.providerKind !== providerKind || meta.model !== model) {
           mismatch = true;
           sessionStore.updateProviderMeta(sessionId, providerKind, model);
@@ -124,6 +137,7 @@ export function ChatScreen({
       providerMismatch: mismatch,
       initialSystemPrompt: systemPrompt,
       initialJailbreakPrompt: jailbreakPrompt,
+      initialActiveSkillIds: activeSkillIds,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, structured, vector, sessionId, sessionStore]);
@@ -138,6 +152,8 @@ export function ChatScreen({
   // One picker component instance, driven by which "slot" the user tapped to
   // open it — persona icon vs jailbreak icon. `null` means the modal is hidden.
   const [pickerKind, setPickerKind] = useState<SavedPromptKind | null>(null);
+  const [skillPickerVisible, setSkillPickerVisible] = useState(false);
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>(() => [...initialActiveSkillIds]);
   // First tap arms the wipe (icon flips to a confirm state); second tap fires
   // it. Same "tap to arm, tap again to confirm" pattern the prompt picker uses
   // for deletes — no separate modal for a one-button action.
@@ -188,6 +204,23 @@ export function ChatScreen({
       setError(friendlyErrorMessage(err));
     }
   };
+
+  const handleActiveSkillsChange = (next: string[]) => {
+    try {
+      if (sessionId && sessionStore) sessionStore.updateActiveSkillIds(sessionId, next, Date.now());
+      setActiveSkillIds(next);
+    } catch (err) {
+      console.error("updateActiveSkillIds failed:", err);
+      setError(friendlyErrorMessage(err));
+    }
+  };
+
+  /** Resolve the current active skill ids into their `SavedSkill` objects,
+   * dropping any id whose skill was since deleted. Called at send-time so
+   * an edit to a skill's body takes effect on the next turn without a
+   * refresh. */
+  const resolveActiveSkills = () =>
+    activeSkillIds.map((id) => skillStore.get(id)).filter((s): s is NonNullable<typeof s> => s !== undefined);
 
   const handleWipeHistory = () => {
     // Refuse while a request is in flight — wiping mid-turn would race with
@@ -252,6 +285,7 @@ export function ChatScreen({
         activeSystemPrompt,
         cacheSettings,
         activeJailbreakPrompt,
+        resolveActiveSkills(),
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -295,6 +329,7 @@ export function ChatScreen({
         activeSystemPrompt,
         cacheSettings,
         activeJailbreakPrompt,
+        resolveActiveSkills(),
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -347,6 +382,7 @@ export function ChatScreen({
         activeSystemPrompt,
         cacheSettings,
         activeJailbreakPrompt,
+        resolveActiveSkills(),
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -449,6 +485,18 @@ export function ChatScreen({
             <Ionicons name="chatbox-ellipses-outline" size={20} color={MUTED} />
           </Pressable>
           <Pressable
+            onPress={() => setSkillPickerVisible(true)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Manage skills — ${activeSkillIds.length} active`}
+          >
+            <Ionicons
+              name={activeSkillIds.length > 0 ? "sparkles" : "sparkles-outline"}
+              size={20}
+              color={activeSkillIds.length > 0 ? ACCENT : MUTED}
+            />
+          </Pressable>
+          <Pressable
             onPress={onOpenMemory}
             hitSlop={8}
             accessibilityRole="button"
@@ -526,6 +574,14 @@ export function ChatScreen({
         promptStore={promptStore}
         onSelect={pickerKind === "jailbreak" ? handleSelectJailbreakPrompt : handleSelectSystemPrompt}
         onClose={() => setPickerKind(null)}
+      />
+
+      <SkillPickerModal
+        visible={skillPickerVisible}
+        skillStore={skillStore}
+        activeIds={activeSkillIds}
+        onActiveIdsChange={handleActiveSkillsChange}
+        onClose={() => setSkillPickerVisible(false)}
       />
     </KeyboardAvoidingView>
   );

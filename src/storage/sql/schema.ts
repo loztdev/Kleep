@@ -111,6 +111,24 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE chat_sessions ADD COLUMN jailbreak_prompt TEXT;
     `,
   },
+  {
+    id: "0004_skills",
+    sql: `
+      CREATE TABLE IF NOT EXISTS saved_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        when_to_use TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      -- JSON array of skill ids that are active for this chat's system
+      -- prompt composition. NULL when the chat has no active skills.
+      ALTER TABLE chat_sessions ADD COLUMN active_skill_ids TEXT;
+    `,
+  },
 ];
 
 /** Create the migrations table and apply any migration not yet recorded, in order. */

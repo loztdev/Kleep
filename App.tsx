@@ -6,15 +6,19 @@ import { clearApiKey, loadActiveProvider, loadApiKey } from "./src/llm/secureKey
 import {
   ChatSessionStore,
   InMemoryPromptStore,
+  InMemorySkillStore,
   InMemoryStructuredStore,
   InMemoryVectorStore,
   SqlitePromptStore,
+  SqliteSkillStore,
   SqliteStructuredStore,
   SqliteVectorStore,
   type PromptStore,
+  type SkillStore,
   type StructuredStore,
   type VectorStore,
 } from "./src/storage";
+import { seedBootstrapSkills } from "./src/skills";
 import type { SqlDatabase } from "./src/storage/sql/types";
 import { openKleepDatabase } from "./src/storage/sql/openKleepDatabase";
 import { DEFAULT_CACHE_SETTINGS, type CacheSettings } from "./src/ui/chatReply";
@@ -45,6 +49,7 @@ interface ConnectedContext {
   structured: StructuredStore;
   vector: VectorStore;
   promptStore: PromptStore;
+  skillStore: SkillStore;
   sessionStore: ChatSessionStore | null;
 }
 
@@ -58,6 +63,7 @@ type AppState =
 function buildConnectedContext(
   db: SqlDatabase | null,
   promptStore: PromptStore,
+  skillStore: SkillStore,
   provider: LlmProvider,
   providerKind: LlmProviderKind,
   model?: string,
@@ -75,6 +81,7 @@ function buildConnectedContext(
     structured: db ? new SqliteStructuredStore(db) : new InMemoryStructuredStore(),
     vector: db ? new SqliteVectorStore(db) : new InMemoryVectorStore(),
     promptStore,
+    skillStore,
     sessionStore: db ? new ChatSessionStore(db) : null,
   };
 }
@@ -93,6 +100,13 @@ export default function App() {
     () => (db ? new SqlitePromptStore(db) : new InMemoryPromptStore()),
     [db],
   );
+  const skillStore = useMemo<SkillStore>(() => {
+    const store = db ? new SqliteSkillStore(db) : new InMemorySkillStore();
+    // Seed bootstrap skills once per store instance — the seed is
+    // idempotent by stable id, so if the user deleted one it stays gone.
+    seedBootstrapSkills(store, Date.now());
+    return store;
+  }, [db]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +117,7 @@ export default function App() {
         if (cancelled) return;
         if (kind && apiKey) {
           const provider = buildLlmProvider({ kind, apiKey });
-          setState(initialConnectedState(buildConnectedContext(db, promptStore, provider, kind)));
+          setState(initialConnectedState(buildConnectedContext(db, promptStore, skillStore, provider, kind)));
         } else {
           setState({ status: "disconnected" });
         }
@@ -143,6 +157,7 @@ export default function App() {
           buildConnectedContext(
             db,
             promptStore,
+            skillStore,
             provider,
             kind,
             model,
@@ -153,7 +168,7 @@ export default function App() {
         ),
       );
     },
-    [db, promptStore],
+    [db, promptStore, skillStore],
   );
 
   if (state.status === "loading") {
@@ -207,6 +222,7 @@ export default function App() {
         structured={state.ctx.structured}
         vector={state.ctx.vector}
         promptStore={state.ctx.promptStore}
+        skillStore={state.ctx.skillStore}
         defaultSystemPrompt={state.ctx.defaultSystemPrompt}
         defaultJailbreakPrompt={state.ctx.defaultJailbreakPrompt}
         cacheSettings={state.ctx.cacheSettings}

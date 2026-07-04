@@ -177,3 +177,56 @@ export interface PromptStore {
   /** Remove a prompt by id; returns true if it existed. */
   delete(id: string): boolean;
 }
+
+/**
+ * A user-authored skill — a persistent instruction the model can apply when a
+ * specific task/topic comes up. Mirrors the Claude Code `.claude/skills/*.md`
+ * shape: YAML-frontmatter metadata (name/description/whenToUse) plus a
+ * markdown body. Split into columns rather than one flat blob so the browsing
+ * UI and the "which skill fires when" wiring don't have to re-parse the
+ * frontmatter every render.
+ */
+export interface SavedSkill {
+  id: string;
+  /** Short identifier — e.g. "Skill Authoring", "Scene Structure". */
+  name: string;
+  /** One-line summary of what the skill does. */
+  description: string;
+  /** One-line trigger hint — when the model (or user) should apply the skill. */
+  whenToUse: string;
+  /** Markdown body — the actual instructions the skill carries. */
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Persistence contract for skills. Same in-memory-fallback + sqlite pattern
+ * as `PromptStore` — the shared memory stores work for the length of a
+ * session on web (no persistence there), only real durability on native.
+ */
+export interface SkillStore {
+  create(skill: {
+    id: string;
+    name: string;
+    description: string;
+    whenToUse: string;
+    body: string;
+    now: number;
+  }): SavedSkill;
+
+  /** Every skill, most-recently-updated first. */
+  list(): SavedSkill[];
+
+  get(id: string): SavedSkill | undefined;
+
+  /** Update fields on a skill; bumps `updatedAt`. No-op if `id` is unknown. */
+  update(
+    id: string,
+    fields: { name: string; description: string; whenToUse: string; body: string },
+    now: number,
+  ): void;
+
+  /** Remove a skill by id; returns true if it existed. */
+  delete(id: string): boolean;
+}

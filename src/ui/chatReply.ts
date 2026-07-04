@@ -7,6 +7,7 @@
 
 import { TurnRole, type Turn } from "../conversation";
 import type { LlmMessage, LlmProvider } from "../llm";
+import type { SavedSkill } from "../storage";
 
 const DEFAULT_SYSTEM_PROMPT = `You are Kleep, a warm, attentive conversational companion with a good memory for detail. Respond naturally to the user, drawing on what's been said earlier in the conversation. Keep replies conversational — a few sentences, not an essay — unless the user is clearly asking for something longer.`;
 
@@ -28,24 +29,47 @@ export interface CacheSettings {
 export const DEFAULT_CACHE_SETTINGS: CacheSettings = { enabled: true };
 
 /**
- * Compose the effective system message. When a jailbreak prompt is set it
- * lands *first*, then the persona (or Kleep's built-in default) after a blank
- * line. Order is deliberate: the JB establishes what's allowed, the persona
- * only decides *how* the model sounds — a persona-last layout keeps the
- * "permissions floor" from being reset by whatever the persona says. Empty/
- * whitespace-only strings on either side degrade to the other alone (or the
- * built-in persona when both are empty), so callers can pass `undefined` or
- * `""` interchangeably.
+ * Compose the effective system message. Layer order from front to back:
+ *
+ *   [jailbreak]  ← establishes what's allowed
+ *   [persona]    ← decides how the model sounds
+ *   [skills]     ← task-specific guidance the model should apply on trigger
+ *
+ * Persona-last vs jailbreak keeps the "permissions floor" from being reset
+ * by whatever the persona says. Skills-last vs persona keeps the persona's
+ * *voice* setting the baseline while a triggered skill overlays its
+ * task-specific rules on top. Every layer degrades gracefully — empty/
+ * whitespace-only strings and empty arrays are all treated as "not set,"
+ * so callers can pass `undefined`, `""`, or `[]` interchangeably. Both
+ * slots empty and no skills falls back to the built-in Kleep persona.
  */
 export function composeSystemPrompt(
   jailbreakPrompt?: string,
   systemPrompt?: string,
+  activeSkills?: readonly SavedSkill[],
 ): string {
   const jb = jailbreakPrompt?.trim() ?? "";
   const persona = systemPrompt?.trim() ?? "";
-  if (jb && persona) return `${jb}\n\n${persona}`;
-  if (jb) return jb;
-  return persona || DEFAULT_SYSTEM_PROMPT;
+  const skills = (activeSkills ?? []).filter((s) => s.body.trim().length > 0);
+
+  const parts: string[] = [];
+  if (jb) parts.push(jb);
+  if (persona) parts.push(persona);
+  if (parts.length === 0 && skills.length === 0) parts.push(DEFAULT_SYSTEM_PROMPT);
+  if (skills.length > 0) parts.push(renderSkillsBlock(skills));
+  return parts.join("\n\n");
+}
+
+/** Render the "skills" block that gets appended to the system prompt.
+ * Each skill goes in with its name as a heading, its whenToUse as a
+ * trigger hint, and its body. Kept compact — no bullet noise around
+ * the body — so a five-skill chat doesn't blow past the model's system-
+ * prompt sweet spot. */
+function renderSkillsBlock(skills: readonly SavedSkill[]): string {
+  const rendered = skills
+    .map((s) => `## ${s.name}\n\n_Apply when: ${s.whenToUse}_\n\n${s.body}`)
+    .join("\n\n---\n\n");
+  return `# Skills\n\nThe following skills are active for this conversation. Apply each when its \`when to use\` condition is met — silently, without narrating that you're doing so.\n\n${rendered}`;
 }
 
 /**
@@ -62,6 +86,7 @@ export async function generateReply(
   systemPrompt?: string,
   cacheSettings: CacheSettings = DEFAULT_CACHE_SETTINGS,
   jailbreakPrompt?: string,
+  activeSkills?: readonly SavedSkill[],
 ): Promise<string> {
   const messages: LlmMessage[] = turns
     .filter((t): t is Turn & { role: typeof TurnRole.USER | typeof TurnRole.ASSISTANT } =>
@@ -71,7 +96,7 @@ export async function generateReply(
 
   const result = await provider.sendMessage({
     messages,
-    system: composeSystemPrompt(jailbreakPrompt, systemPrompt),
+    system: composeSystemPrompt(jailbreakPrompt, systemPrompt, activeSkills),
     maxTokens: 500,
     // `messages` grows every turn, so once the conversation crosses the
     // model's minimum cacheable token count, later turns get cheaper,

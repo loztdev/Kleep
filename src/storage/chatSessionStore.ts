@@ -29,6 +29,14 @@ export interface ChatSessionMeta {
    * the two are actually composed on the wire.
    */
   jailbreakPrompt?: string;
+  /**
+   * Ids of `SavedSkill`s active for this chat — their bodies get appended to
+   * the composed system message on every turn. Empty array is meaningful
+   * (user cleared all skills); missing/undefined is "never touched." A stale
+   * id that no longer resolves to a skill is silently ignored by the reader
+   * so a skill delete doesn't have to fan out to every session.
+   */
+  activeSkillIds?: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -46,9 +54,25 @@ interface SessionRow {
   model: string | null;
   system_prompt: string | null;
   jailbreak_prompt: string | null;
+  active_skill_ids: string | null;
   created_at: number;
   updated_at: number;
   processed_count: number;
+}
+
+/** Parse the JSON array we store in `active_skill_ids`. Returns `undefined`
+ * for NULL (never touched) and `[]` for the explicit empty case (user
+ * cleared). A malformed value is treated as "never touched" rather than
+ * crashing — the alternative is a corrupted row blocking the whole chat. */
+function parseActiveSkillIds(raw: string | null): string[] | undefined {
+  if (raw === null) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return undefined;
+  }
 }
 
 interface TurnRow {
@@ -65,6 +89,7 @@ function optionalField<K extends string, V>(key: K, value: V | null | undefined)
 }
 
 function toMeta(row: SessionRow): ChatSessionMeta {
+  const activeSkillIds = parseActiveSkillIds(row.active_skill_ids);
   return {
     id: row.id,
     title: row.title,
@@ -72,6 +97,7 @@ function toMeta(row: SessionRow): ChatSessionMeta {
     ...optionalField("model", row.model),
     ...optionalField("systemPrompt", row.system_prompt),
     ...optionalField("jailbreakPrompt", row.jailbreak_prompt),
+    ...(activeSkillIds !== undefined ? { activeSkillIds } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -88,11 +114,14 @@ export class ChatSessionStore {
     model?: string;
     systemPrompt?: string;
     jailbreakPrompt?: string;
+    activeSkillIds?: readonly string[];
     now: number;
   }): ChatSessionMeta {
+    const activeSkillsJson =
+      opts.activeSkillIds !== undefined ? JSON.stringify(opts.activeSkillIds) : null;
     this.db.runSync(
-      `INSERT INTO chat_sessions (id, title, provider_kind, model, system_prompt, jailbreak_prompt, created_at, updated_at, processed_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      `INSERT INTO chat_sessions (id, title, provider_kind, model, system_prompt, jailbreak_prompt, active_skill_ids, created_at, updated_at, processed_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       [
         opts.id,
         opts.title,
@@ -100,6 +129,7 @@ export class ChatSessionStore {
         opts.model ?? null,
         opts.systemPrompt ?? null,
         opts.jailbreakPrompt ?? null,
+        activeSkillsJson,
         opts.now,
         opts.now,
       ],
@@ -111,6 +141,7 @@ export class ChatSessionStore {
       ...optionalField("model", opts.model),
       ...optionalField("systemPrompt", opts.systemPrompt),
       ...optionalField("jailbreakPrompt", opts.jailbreakPrompt),
+      ...(opts.activeSkillIds !== undefined ? { activeSkillIds: [...opts.activeSkillIds] } : {}),
       createdAt: opts.now,
       updatedAt: opts.now,
     };
@@ -168,6 +199,23 @@ export class ChatSessionStore {
     this.db.runSync(
       "UPDATE chat_sessions SET jailbreak_prompt = ?, updated_at = ? WHERE id = ?",
       [jailbreakPrompt ?? null, now, id],
+    );
+  }
+
+  /**
+   * Replace the whole active-skills set for this chat. Pass `undefined` to
+   * reset the column back to NULL (no session-level opinion); pass `[]` to
+   * explicitly clear (user turned everything off). Bumps `updated_at`.
+   */
+  updateActiveSkillIds(
+    id: string,
+    activeSkillIds: readonly string[] | undefined,
+    now: number,
+  ): void {
+    const json = activeSkillIds !== undefined ? JSON.stringify(activeSkillIds) : null;
+    this.db.runSync(
+      "UPDATE chat_sessions SET active_skill_ids = ?, updated_at = ? WHERE id = ?",
+      [json, now, id],
     );
   }
 
