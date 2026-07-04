@@ -1,5 +1,6 @@
-import type { LlmProvider, LlmSendOptions, LlmStreamHandle, LlmStructuredOptions, LlmStructuredResult, LlmTextResult } from "../../llm";
+import type { LlmProvider, LlmSendOptions, LlmStreamHandle, LlmStructuredOptions, LlmStructuredResult, LlmTextResult, LlmToolUse } from "../../llm";
 import { TurnRole, type Turn } from "../../conversation";
+import type { ToolRegistration } from "../../memoryTools";
 import type { SavedSkill } from "../../storage";
 import { composeSystemPrompt, generateReply } from "../chatReply";
 
@@ -68,6 +69,115 @@ describe("generateReply", () => {
     await generateReply(provider, turns, undefined, undefined, "No restrictions apply.");
 
     expect(provider.calls[0]!.system).toBe("No restrictions apply.");
+  });
+
+  describe("tool-use loop", () => {
+    class ScriptedProvider implements LlmProvider {
+      readonly name = "scripted";
+      calls: LlmSendOptions[] = [];
+      constructor(private readonly responses: LlmTextResult[]) {}
+
+      totalCostUsd(): number {
+        return 0;
+      }
+
+      async sendMessage(opts: LlmSendOptions): Promise<LlmTextResult> {
+        this.calls.push(opts);
+        const next = this.responses.shift();
+        if (!next) throw new Error("ScriptedProvider ran out of responses");
+        return next;
+      }
+
+      async structured<T>(_opts: LlmStructuredOptions<T>): Promise<LlmStructuredResult<T>> {
+        throw new Error("not used");
+      }
+      streamMessage(_opts: LlmSendOptions): LlmStreamHandle {
+        throw new Error("not used");
+      }
+    }
+
+    function stubToolReg(name: string, exec: (input: unknown) => Promise<{ content: string; isError?: boolean }>): ToolRegistration {
+      return {
+        definition: { name, description: `${name} desc`, inputSchema: { type: "object", properties: {} } },
+        execute: exec,
+      };
+    }
+
+    it("executes the tool the model requested and feeds the result back", async () => {
+      const executed: unknown[] = [];
+      const tool = stubToolReg("remember_fact", async (input) => {
+        executed.push(input);
+        return { content: "ok, stored" };
+      });
+      const toolUse: LlmToolUse = { id: "call_1", name: "remember_fact", input: { content: "My name is Aaron." } };
+      const provider = new ScriptedProvider([
+        // First call: model asks for the tool.
+        { text: "", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, toolUses: [toolUse], stopReason: "tool_use" },
+        // Second call: model produces its final text.
+        { text: "Got it — noted.", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+
+      const reply = await generateReply(
+        provider,
+        [turn(TurnRole.USER, "Remember my name is Aaron.", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [tool],
+      );
+
+      expect(reply).toBe("Got it — noted.");
+      expect(executed).toEqual([{ content: "My name is Aaron." }]);
+      // Two round trips: initial + after-tool-result.
+      expect(provider.calls).toHaveLength(2);
+      // Second call carries the assistant tool_use + user tool_result turns.
+      const secondMessages = provider.calls[1]!.messages;
+      expect(secondMessages.length).toBeGreaterThanOrEqual(3);
+      const assistantTurn = secondMessages[secondMessages.length - 2]!;
+      const userToolResultTurn = secondMessages[secondMessages.length - 1]!;
+      expect(assistantTurn.role).toBe("assistant");
+      expect(userToolResultTurn.role).toBe("user");
+      expect(Array.isArray(userToolResultTurn.content)).toBe(true);
+    });
+
+    it("does not enter the loop when tools are omitted", async () => {
+      const provider = new ScriptedProvider([
+        { text: "plain reply", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+      const reply = await generateReply(provider, [turn(TurnRole.USER, "hi", 0)]);
+      expect(reply).toBe("plain reply");
+      expect(provider.calls).toHaveLength(1);
+    });
+
+    it("reports an error message back to the model when a requested tool is unknown", async () => {
+      const provider = new ScriptedProvider([
+        {
+          text: "",
+          model: "m",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          toolUses: [{ id: "call_1", name: "totally_bogus", input: {} }],
+          stopReason: "tool_use",
+        },
+        { text: "sorry", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+      await generateReply(
+        provider,
+        [turn(TurnRole.USER, "hi", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [],
+      );
+      const followupMessages = provider.calls[1]!.messages;
+      const toolResultTurn = followupMessages[followupMessages.length - 1]!;
+      expect(Array.isArray(toolResultTurn.content)).toBe(true);
+      const blocks = toolResultTurn.content as ReadonlyArray<{ type: string; isError?: boolean; content?: string }>;
+      expect(blocks[0]!.type).toBe("tool_result");
+      expect(blocks[0]!.isError).toBe(true);
+      expect(blocks[0]!.content).toMatch(/Unknown tool/);
+    });
   });
 });
 

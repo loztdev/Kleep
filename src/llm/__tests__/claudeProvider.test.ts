@@ -52,7 +52,8 @@ describe("ClaudeProvider", () => {
 
     const result = await provider.sendMessage({ messages: [{ role: "user", content: "hi" }] });
 
-    expect(result).toEqual({ text: "hello", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(result).toMatchObject({ text: "hello", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(result.stopReason).toBe("end_turn");
     expect(provider.name).toBe("claude");
   });
 
@@ -129,6 +130,6 @@ describe("ClaudeProvider", () => {
     const final = await handle.final;
 
     expect(collected.join("")).toBe("hi there");
-    expect(final).toEqual({ text: "hi there", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(final).toMatchObject({ text: "hi there", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
   });
 });

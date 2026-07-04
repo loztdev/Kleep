@@ -20,10 +20,23 @@ export interface OpenRouterTextContentBlock {
   cache_control?: OpenRouterCacheControl;
 }
 
+/**
+ * Chat-completion message shape. The `tool` role carries a `tool_call_id`
+ * that references an earlier assistant `tool_calls[i].id`; the assistant
+ * role optionally carries `tool_calls` when the model wants to invoke a
+ * function. `content` may be `null` when the assistant only produced
+ * `tool_calls` and no text — OpenAI's schema requires nullable content for
+ * that case, and OpenRouter preserves the same shape.
+ */
 export interface OpenRouterMessage {
-  role: "system" | "user" | "assistant";
-  /** Plain string for the common case; a content-block array only when a block needs `cache_control`. */
-  content: string | OpenRouterTextContentBlock[];
+  role: "system" | "user" | "assistant" | "tool";
+  /** Plain string for the common case; a content-block array only when a
+   * block needs `cache_control`; `null` for assistant-with-tool_calls only. */
+  content: string | OpenRouterTextContentBlock[] | null;
+  /** Present only on assistant messages that requested tool calls. */
+  tool_calls?: OpenRouterToolCall[];
+  /** Present only on `role: "tool"` messages — the id of the earlier tool_call. */
+  tool_call_id?: string;
 }
 
 /** JSON-schema-shaped function tool, OpenAI function-calling convention. */

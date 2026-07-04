@@ -1,12 +1,17 @@
 export type {
+  LlmContentBlock,
   LlmMessage,
   LlmProvider,
   LlmSendOptions,
+  LlmStopReason,
   LlmStreamChunk,
   LlmStreamHandle,
   LlmStructuredOptions,
   LlmStructuredResult,
   LlmTextResult,
+  LlmToolDefinition,
+  LlmToolResult,
+  LlmToolUse,
   LlmUsage,
 } from "./types";
 export { ClaudeProvider } from "./claudeProvider";

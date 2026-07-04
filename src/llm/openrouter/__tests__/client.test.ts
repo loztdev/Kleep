@@ -57,7 +57,7 @@ describe("OpenRouterClient.sendMessage", () => {
 
     const result = await client.sendMessage({ messages: [{ role: "user", content: "hi" }] });
 
-    expect(result).toEqual({ text: "hello", model: "openai/gpt-4o-mini", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(result).toMatchObject({ text: "hello", model: "openai/gpt-4o-mini", usage: { inputTokens: 10, outputTokens: 5 } });
     expect(client.costTracker.totalUsd()).toBeCloseTo(0.0001);
     expect(transport.calls[0]).toMatchObject({ model: "openai/gpt-4o-mini" });
   });
