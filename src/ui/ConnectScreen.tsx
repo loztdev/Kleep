@@ -121,7 +121,10 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      // See ChatScreen.tsx for why Android uses "height" rather than the
+      // undefined-and-rely-on-window-resize approach — same edge-to-edge
+      // Expo SDK 51+ change hides the focused input under the soft keyboard.
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <ScrollView contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
