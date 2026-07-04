@@ -5,6 +5,7 @@
 export type {
   PromptStore,
   SavedPrompt,
+  SavedPromptKind,
   StructuredQuery,
   StructuredStore,
   VectorQueryFilter,

@@ -22,6 +22,13 @@ export interface ChatSessionMeta {
   model?: string;
   /** Per-chat system prompt override — falls back to the app default (or Kleep's built-in persona) when unset. */
   systemPrompt?: string;
+  /**
+   * Per-chat "jailbreak" — a permissions/behavior prompt prepended *before*
+   * the persona system prompt when non-empty. Empty/unset means we send only
+   * the persona (existing behavior). See `chatReply.generateReply` for how
+   * the two are actually composed on the wire.
+   */
+  jailbreakPrompt?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -38,6 +45,7 @@ interface SessionRow {
   provider_kind: string;
   model: string | null;
   system_prompt: string | null;
+  jailbreak_prompt: string | null;
   created_at: number;
   updated_at: number;
   processed_count: number;
@@ -63,6 +71,7 @@ function toMeta(row: SessionRow): ChatSessionMeta {
     providerKind: row.provider_kind as LlmProviderKind,
     ...optionalField("model", row.model),
     ...optionalField("systemPrompt", row.system_prompt),
+    ...optionalField("jailbreakPrompt", row.jailbreak_prompt),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -78,17 +87,19 @@ export class ChatSessionStore {
     providerKind: LlmProviderKind;
     model?: string;
     systemPrompt?: string;
+    jailbreakPrompt?: string;
     now: number;
   }): ChatSessionMeta {
     this.db.runSync(
-      `INSERT INTO chat_sessions (id, title, provider_kind, model, system_prompt, created_at, updated_at, processed_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+      `INSERT INTO chat_sessions (id, title, provider_kind, model, system_prompt, jailbreak_prompt, created_at, updated_at, processed_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       [
         opts.id,
         opts.title,
         opts.providerKind,
         opts.model ?? null,
         opts.systemPrompt ?? null,
+        opts.jailbreakPrompt ?? null,
         opts.now,
         opts.now,
       ],
@@ -99,6 +110,7 @@ export class ChatSessionStore {
       providerKind: opts.providerKind,
       ...optionalField("model", opts.model),
       ...optionalField("systemPrompt", opts.systemPrompt),
+      ...optionalField("jailbreakPrompt", opts.jailbreakPrompt),
       createdAt: opts.now,
       updatedAt: opts.now,
     };
@@ -148,6 +160,14 @@ export class ChatSessionStore {
     this.db.runSync(
       "UPDATE chat_sessions SET system_prompt = ?, updated_at = ? WHERE id = ?",
       [systemPrompt ?? null, now, id],
+    );
+  }
+
+  /** Set (or clear, passing `undefined`) this chat's jailbreak prompt. */
+  updateJailbreakPrompt(id: string, jailbreakPrompt: string | undefined, now: number): void {
+    this.db.runSync(
+      "UPDATE chat_sessions SET jailbreak_prompt = ?, updated_at = ? WHERE id = ?",
+      [jailbreakPrompt ?? null, now, id],
     );
   }
 

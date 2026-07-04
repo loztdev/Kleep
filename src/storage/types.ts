@@ -122,11 +122,23 @@ export interface VectorStore {
   list(filter?: VectorQueryFilter): LoreSnippet[];
 }
 
+/**
+ * Two flavors of saved prompt:
+ * - `persona` — the "who you're talking to" system prompt (the original kind).
+ * - `jailbreak` — a permissioning/behavior-shaping prompt prepended *before*
+ *   the persona so the persona doesn't have to also encode the permissions.
+ * Same shape either way; `kind` is a flat marker the UI uses to split the
+ * list into two views and lets a prompt be promoted/demoted between them
+ * without losing history.
+ */
+export type SavedPromptKind = "persona" | "jailbreak";
+
 /** A user-saved system prompt — plain app config, no provenance tracking needed. */
 export interface SavedPrompt {
   id: string;
   title: string;
   content: string;
+  kind: SavedPromptKind;
   createdAt: number;
   updatedAt: number;
 }
@@ -138,16 +150,29 @@ export interface SavedPrompt {
  * same way `structured`/`vector` do — only chat *history* is native-only.
  */
 export interface PromptStore {
-  /** Create a new saved prompt. */
-  create(prompt: { id: string; title: string; content: string; now: number }): SavedPrompt;
+  /** Create a new saved prompt. `kind` defaults to `persona` when unset. */
+  create(prompt: {
+    id: string;
+    title: string;
+    content: string;
+    kind?: SavedPromptKind;
+    now: number;
+  }): SavedPrompt;
 
-  /** Every saved prompt, most-recently-updated first. */
-  list(): SavedPrompt[];
+  /** Every saved prompt, most-recently-updated first. Pass `kind` to filter to one flavor. */
+  list(kind?: SavedPromptKind): SavedPrompt[];
 
   get(id: string): SavedPrompt | undefined;
 
   /** Update a prompt's title/content; bumps `updatedAt`. No-op if `id` is unknown. */
   update(id: string, fields: { title: string; content: string }, now: number): void;
+
+  /**
+   * Flip a prompt between `persona` and `jailbreak` without touching title/
+   * content — the UI's "move to jailbreaks" / "move to personas" action.
+   * Bumps `updatedAt` so the moved prompt jumps to the top of the target list.
+   */
+  setKind(id: string, kind: SavedPromptKind, now: number): void;
 
   /** Remove a prompt by id; returns true if it existed. */
   delete(id: string): boolean;

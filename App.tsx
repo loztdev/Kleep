@@ -40,6 +40,7 @@ interface ConnectedContext {
   providerKind: LlmProviderKind;
   model?: string;
   defaultSystemPrompt?: string;
+  defaultJailbreakPrompt?: string;
   cacheSettings: CacheSettings;
   structured: StructuredStore;
   vector: VectorStore;
@@ -62,12 +63,14 @@ function buildConnectedContext(
   model?: string,
   defaultSystemPrompt?: string,
   cacheSettings: CacheSettings = DEFAULT_CACHE_SETTINGS,
+  defaultJailbreakPrompt?: string,
 ): ConnectedContext {
   return {
     provider,
     providerKind,
     ...(model ? { model } : {}),
     ...(defaultSystemPrompt ? { defaultSystemPrompt } : {}),
+    ...(defaultJailbreakPrompt ? { defaultJailbreakPrompt } : {}),
     cacheSettings,
     structured: db ? new SqliteStructuredStore(db) : new InMemoryStructuredStore(),
     vector: db ? new SqliteVectorStore(db) : new InMemoryVectorStore(),
@@ -133,10 +136,20 @@ export default function App() {
       model?: string,
       defaultSystemPrompt?: string,
       cacheSettings?: CacheSettings,
+      defaultJailbreakPrompt?: string,
     ) => {
       setState(
         initialConnectedState(
-          buildConnectedContext(db, promptStore, provider, kind, model, defaultSystemPrompt, cacheSettings),
+          buildConnectedContext(
+            db,
+            promptStore,
+            provider,
+            kind,
+            model,
+            defaultSystemPrompt,
+            cacheSettings,
+            defaultJailbreakPrompt,
+          ),
         ),
       );
     },
@@ -195,6 +208,7 @@ export default function App() {
         vector={state.ctx.vector}
         promptStore={state.ctx.promptStore}
         defaultSystemPrompt={state.ctx.defaultSystemPrompt}
+        defaultJailbreakPrompt={state.ctx.defaultJailbreakPrompt}
         cacheSettings={state.ctx.cacheSettings}
         sessionId={state.sessionId}
         sessionStore={state.ctx.sessionStore}
@@ -236,6 +250,7 @@ function ChatListBody({
       providerKind: ctx.providerKind,
       ...(ctx.model ? { model: ctx.model } : {}),
       ...(ctx.defaultSystemPrompt ? { systemPrompt: ctx.defaultSystemPrompt } : {}),
+      ...(ctx.defaultJailbreakPrompt ? { jailbreakPrompt: ctx.defaultJailbreakPrompt } : {}),
       now: Date.now(),
     });
     onOpenChat(session.id);
