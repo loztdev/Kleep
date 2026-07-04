@@ -72,7 +72,12 @@ export async function generateReply(
   const result = await provider.sendMessage({
     messages,
     system: composeSystemPrompt(jailbreakPrompt, systemPrompt),
-    maxTokens: 500,
+    // 4096 tokens ≈ 3000 words of headroom — the earlier cap of 500 tokens
+    // (~375 words) was cutting long-form and creative-writing replies in
+    // half mid-sentence, which reads as "the model refused" when it just
+    // ran out of budget. Providers still honor their own per-model max, so
+    // over-asking here is safe.
+    maxTokens: 4096,
     // `messages` grows every turn, so once the conversation crosses the
     // model's minimum cacheable token count, later turns get cheaper,
     // faster reprocessing of the earlier history.
