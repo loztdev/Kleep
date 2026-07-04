@@ -27,7 +27,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -142,6 +142,15 @@ export function ChatScreen({
   // it. Same "tap to arm, tap again to confirm" pattern the prompt picker uses
   // for deletes — no separate modal for a one-button action.
   const [confirmingWipe, setConfirmingWipe] = useState(false);
+
+  // Disarm on session change so an armed wipe from one chat can't fire against
+  // a different chat if this component instance ever gets reused (React
+  // reconciliation keeps `useState` slots alive across a `sessionId` prop
+  // change without unmounting). Belt-and-braces alongside App's current
+  // unmount-between-sessions navigation.
+  useEffect(() => {
+    setConfirmingWipe(false);
+  }, [sessionId]);
   const scrollRef = useRef<ScrollView>(null);
   // `sending` (state) lags a render behind a tap, so a fast double-tap can
   // slip through before any button disables — this ref guard is synchronous.
@@ -224,6 +233,11 @@ export function ChatScreen({
     sendingRef.current = true;
     setError(null);
     setSending(true);
+    // Any active action disarms a pending wipe — the confirmation only means
+    // "you meant to wipe *this* transcript right now," not "wipe whenever you
+    // next tap the icon." Also keeps the icon's disabled color from being
+    // shadowed by the armed ERROR color while `sending` is true.
+    setConfirmingWipe(false);
 
     try {
       const userTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: engine.buffer.size() };
@@ -267,6 +281,7 @@ export function ChatScreen({
     sendingRef.current = true;
     setError(null);
     setSending(true);
+    setConfirmingWipe(false);
 
     try {
       // Compute the new reply from the context *before* this turn first,
@@ -322,6 +337,7 @@ export function ChatScreen({
     sendingRef.current = true;
     setError(null);
     setSending(true);
+    setConfirmingWipe(false);
 
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
@@ -396,7 +412,10 @@ export function ChatScreen({
             <Ionicons
               name={confirmingWipe ? "checkmark-circle-outline" : "refresh-circle-outline"}
               size={20}
-              color={confirmingWipe ? ERROR : messages.length === 0 || sending ? BORDER : MUTED}
+              // Disabled state must beat the armed state — otherwise a
+              // still-armed icon during an in-flight send/regenerate/edit
+              // renders the red confirm color on a button no tap can reach.
+              color={sending || messages.length === 0 ? BORDER : confirmingWipe ? ERROR : MUTED}
             />
           </Pressable>
           {confirmingWipe ? (
