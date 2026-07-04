@@ -222,6 +222,109 @@ describe("OpenRouterClient.sendMessage", () => {
       client.sendMessage({ messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(OpenRouterEmptyResponseError);
   });
+
+  describe("tool-use translation", () => {
+    it("maps `tools` to the OpenAI function-calling shape in the request", async () => {
+      const transport = new StubTransport(async () => textResponse("ok"));
+      const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+      await client.sendMessage({
+        messages: [{ role: "user", content: "hi" }],
+        tools: [
+          {
+            name: "remember_fact",
+            description: "store a fact",
+            inputSchema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
+          },
+        ],
+      });
+
+      expect(transport.calls[0]!.tools).toEqual([
+        {
+          type: "function",
+          function: {
+            name: "remember_fact",
+            description: "store a fact",
+            parameters: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
+          },
+        },
+      ]);
+    });
+
+    it("splits a block-array assistant turn into one message with text + tool_calls", async () => {
+      const transport = new StubTransport(async () => textResponse("ok"));
+      const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+      await client.sendMessage({
+        messages: [
+          { role: "user", content: "remember my name" },
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: "sure" },
+              { type: "tool_use", id: "call_1", name: "remember_fact", input: { content: "Aaron." } },
+            ],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", toolUseId: "call_1", content: "Remembered: Aaron." }],
+          },
+        ],
+      });
+
+      const req = transport.calls[0]!;
+      // Assistant message: text on `content`, tool_calls alongside.
+      expect(req.messages[1]).toEqual({
+        role: "assistant",
+        content: "sure",
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "remember_fact", arguments: JSON.stringify({ content: "Aaron." }) } },
+        ],
+      });
+      // Follow-up user turn fans out into a separate `role: "tool"` message per tool_result.
+      expect(req.messages[2]).toEqual({ role: "tool", content: "Remembered: Aaron.", tool_call_id: "call_1" });
+    });
+
+    it("emits `content: null` on an assistant message that only produced tool_use blocks", async () => {
+      const transport = new StubTransport(async () => textResponse("ok"));
+      const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+      await client.sendMessage({
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "call_1", name: "remember_fact", input: { content: "x" } }],
+          },
+        ],
+      });
+
+      const asstMsg = transport.calls[0]!.messages[0]!;
+      expect(asstMsg.role).toBe("assistant");
+      expect(asstMsg.content).toBeNull();
+      expect(asstMsg.tool_calls).toHaveLength(1);
+    });
+
+    it("extracts toolUses + stopReason='tool_use' from a tool-only content:null response (no throw)", async () => {
+      const transport = new StubTransport(async () => toolCallResponse("remember_fact", { content: "Aaron." }));
+      const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+      const result = await client.sendMessage({ messages: [{ role: "user", content: "remember" }] });
+
+      expect(result.text).toBe("");
+      expect(result.stopReason).toBe("tool_use");
+      expect(result.toolUses).toEqual([
+        { id: "call_1", name: "remember_fact", input: { content: "Aaron." } },
+      ]);
+    });
+
+    it("normalizes plain-text finish_reason='stop' to stopReason='end_turn'", async () => {
+      const transport = new StubTransport(async () => textResponse("hi"));
+      const client = new OpenRouterClient({ transport, defaultModel: "openai/gpt-4o-mini" });
+
+      const result = await client.sendMessage({ messages: [{ role: "user", content: "hi" }] });
+      expect(result.stopReason).toBe("end_turn");
+    });
+  });
 });
 
 describe("OpenRouterClient.structured", () => {

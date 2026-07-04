@@ -137,8 +137,36 @@ describe("generateReply", () => {
       const assistantTurn = secondMessages[secondMessages.length - 2]!;
       const userToolResultTurn = secondMessages[secondMessages.length - 1]!;
       expect(assistantTurn.role).toBe("assistant");
+      // The assistant turn carries the tool_use block that mirrors what the
+      // model requested — id/name/input have to round-trip untouched or the
+      // provider can't match the follow-up tool_result to its call.
+      const assistantBlocks = assistantTurn.content as ReadonlyArray<{
+        type: string;
+        id?: string;
+        name?: string;
+        input?: unknown;
+      }>;
+      expect(assistantBlocks[0]).toEqual({
+        type: "tool_use",
+        id: "call_1",
+        name: "remember_fact",
+        input: { content: "My name is Aaron." },
+      });
+      // The follow-up user turn carries the tool_result block keyed by the
+      // same toolUseId, with the executor's returned content and no error flag.
       expect(userToolResultTurn.role).toBe("user");
-      expect(Array.isArray(userToolResultTurn.content)).toBe(true);
+      const userBlocks = userToolResultTurn.content as ReadonlyArray<{
+        type: string;
+        toolUseId?: string;
+        content?: string;
+        isError?: boolean;
+      }>;
+      expect(userBlocks[0]).toEqual({
+        type: "tool_result",
+        toolUseId: "call_1",
+        content: "ok, stored",
+      });
+      expect(userBlocks[0]!.isError).toBeUndefined();
     });
 
     it("does not enter the loop when tools are omitted", async () => {
@@ -148,6 +176,78 @@ describe("generateReply", () => {
       const reply = await generateReply(provider, [turn(TurnRole.USER, "hi", 0)]);
       expect(reply).toBe("plain reply");
       expect(provider.calls).toHaveLength(1);
+    });
+
+    it("returns a generic failure string (not the raw exception message) when a tool executor throws", async () => {
+      // The executor's error message can carry internal state or user data;
+      // it must NOT be forwarded verbatim into the model's next tool_result.
+      const leakyMessage = "internal path=/secrets/hidden; last-user='LO'";
+      const tool = stubToolReg("remember_fact", async () => {
+        throw new Error(leakyMessage);
+      });
+      const provider = new ScriptedProvider([
+        {
+          text: "",
+          model: "m",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          toolUses: [{ id: "call_1", name: "remember_fact", input: {} }],
+          stopReason: "tool_use",
+        },
+        { text: "sorry", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        await generateReply(
+          provider,
+          [turn(TurnRole.USER, "hi", 0)],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          [tool],
+        );
+      } finally {
+        warn.mockRestore();
+      }
+
+      const followupMessages = provider.calls[1]!.messages;
+      const toolResultTurn = followupMessages[followupMessages.length - 1]!;
+      const blocks = toolResultTurn.content as ReadonlyArray<{ type: string; content: string; isError?: boolean }>;
+      expect(blocks[0]!.isError).toBe(true);
+      expect(blocks[0]!.content).toBe("Tool remember_fact failed. Nothing was done.");
+      expect(blocks[0]!.content).not.toContain(leakyMessage);
+    });
+
+    it("returns a non-empty placeholder (not '') when MAX_TOOL_ROUNDS is exhausted with no final text", async () => {
+      const tool = stubToolReg("remember_fact", async () => ({ content: "stored" }));
+      // Every response is a tool call with no text — the loop hits its cap
+      // and falls back. Cap in chatReply.ts is 10 so cover 11.
+      const scripted: LlmTextResult[] = Array.from({ length: 11 }, () => ({
+        text: "",
+        model: "m",
+        usage: { inputTokens: 1, outputTokens: 1 },
+        toolUses: [{ id: "call_x", name: "remember_fact", input: {} }],
+        stopReason: "tool_use" as const,
+      }));
+      const provider = new ScriptedProvider(scripted);
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      let reply: string;
+      try {
+        reply = await generateReply(
+          provider,
+          [turn(TurnRole.USER, "loop please", 0)],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          [tool],
+        );
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(reply).not.toBe("");
+      expect(reply.length).toBeGreaterThan(0);
     });
 
     it("reports an error message back to the model when a requested tool is unknown", async () => {

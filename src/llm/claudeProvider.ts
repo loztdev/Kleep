@@ -23,6 +23,7 @@ import type {
   LlmStructuredOptions,
   LlmStructuredResult,
   LlmTextResult,
+  LlmToolDefinition,
   LlmToolUse,
 } from "./types";
 
@@ -85,11 +86,7 @@ function toClaudeContentBlock(block: LlmContentBlock): Anthropic.ContentBlockPar
   }
 }
 
-function toClaudeTool(def: {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}): Anthropic.Tool {
+function toClaudeTool(def: LlmToolDefinition): Anthropic.Tool {
   return {
     name: def.name,
     description: def.description,

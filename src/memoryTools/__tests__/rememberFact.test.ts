@@ -41,6 +41,40 @@ describe("remember_fact tool", () => {
     });
   });
 
+  it("anchors provenance to the triggering user turn (source_turn_id + raw_quote_anchors)", async () => {
+    // Whole point of `MemoryToolContext` is that a fact traces back to the
+    // user turn that caused it — provenance is what makes a stored FACT
+    // more than a floating string. Regression here would silently break
+    // the memory-retrieval story.
+    const { structured, ctx } = makeCtx();
+    const { execute } = buildRememberFactTool(ctx);
+
+    await execute({ content: "The user's name is Aaron." });
+
+    const stored = structured.query({ kind: MemoryKind.FACT });
+    expect(stored[0]!.provenance).toMatchObject({
+      source_turn_id: "turn_1",
+      raw_quote_anchors: [{ turn_id: "turn_1", quote: "Remember my name is Aaron." }],
+    });
+    expect(stored[0]!.provenance.temporal_range).toMatchObject({
+      turn_start: "turn_1",
+      narrative_always: true,
+    });
+  });
+
+  it("filters non-string / empty entity_ids rather than storing them", async () => {
+    const { structured, ctx } = makeCtx();
+    const { execute } = buildRememberFactTool(ctx);
+
+    await execute({
+      content: "The dog belongs to char:aaron.",
+      entity_ids: ["char:aaron", "", 42, null, "char:mojo"],
+    });
+
+    const stored = structured.query({ kind: MemoryKind.FACT });
+    expect(stored[0]).toMatchObject({ entity_ids: ["char:aaron", "char:mojo"] });
+  });
+
   it("returns an error result (does not write) when content is missing", async () => {
     const { structured, ctx } = makeCtx();
     const { execute } = buildRememberFactTool(ctx);

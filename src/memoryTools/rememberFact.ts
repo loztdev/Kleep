@@ -15,22 +15,9 @@
 import { ConfidenceSource, MemoryKind, Network, newId } from "../schema";
 import type { MemoryAsset } from "../schema";
 import type { StructuredStore } from "../storage";
-import type { LlmToolDefinition } from "../llm/types";
+import type { ToolExecutionResult, ToolRegistration } from "./types";
 
 export const REMEMBER_FACT_TOOL_NAME = "remember_fact";
-
-/** Signature every `LlmToolDefinition` needs a paired executor for. */
-export interface ToolExecutionResult {
-  content: string;
-  isError?: boolean;
-}
-
-export type ToolExecutor = (input: unknown) => Promise<ToolExecutionResult>;
-
-export interface ToolRegistration {
-  definition: LlmToolDefinition;
-  execute: ToolExecutor;
-}
 
 /** Context the tool executor needs to attribute a written memory back to the
  * turn that triggered it — the current user message the model is responding
@@ -82,6 +69,15 @@ export function buildRememberFactTool(ctx: MemoryToolContext): ToolRegistration 
   };
 }
 
+/** Coerce whatever the model sent for an array-of-strings field into a
+ * clean `string[]` — non-array inputs become `[]`, and non-string /
+ * empty-string entries are dropped rather than stored as junk. */
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string" && v.length > 0)
+    : [];
+}
+
 async function execute(rawInput: unknown, ctx: MemoryToolContext): Promise<ToolExecutionResult> {
   if (typeof rawInput !== "object" || rawInput === null) {
     return { content: "remember_fact expected an object; got something else. Nothing was stored.", isError: true };
@@ -98,12 +94,8 @@ async function execute(rawInput: unknown, ctx: MemoryToolContext): Promise<ToolE
       isError: true,
     };
   }
-  const tags = Array.isArray(input.tags)
-    ? input.tags.filter((t): t is string => typeof t === "string" && t.length > 0)
-    : [];
-  const entityIds = Array.isArray(input.entity_ids)
-    ? input.entity_ids.filter((e): e is string => typeof e === "string" && e.length > 0)
-    : [];
+  const tags = toStringArray(input.tags);
+  const entityIds = toStringArray(input.entity_ids);
 
   const asset: MemoryAsset = {
     id: newId(),

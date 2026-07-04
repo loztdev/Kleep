@@ -2,7 +2,5 @@ export {
   REMEMBER_FACT_TOOL_NAME,
   buildRememberFactTool,
   type MemoryToolContext,
-  type ToolExecutionResult,
-  type ToolExecutor,
-  type ToolRegistration,
 } from "./rememberFact";
+export type { ToolExecutionResult, ToolExecutor, ToolRegistration } from "./types";

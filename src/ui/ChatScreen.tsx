@@ -270,6 +270,14 @@ export function ChatScreen({
     if (sessionId && sessionStore) syncSessionProgress(sessionStore, sessionId, engine.buffer);
   };
 
+  // The `remember_fact` tool is scoped to a single triggering user turn —
+  // its executor attributes any written memory back to that turn's id/
+  // content, so a fact the model stores cleanly traces back to when it was
+  // learned. Same construction runs for send / regenerate / edit; only the
+  // source turn varies.
+  const rememberToolFor = (turn: Turn) =>
+    buildRememberFactTool({ structured, sourceTurnId: turn.id, sourceQuote: turn.content });
+
   const handleSend = async () => {
     const text = input.trim();
     if (!text || sendingRef.current) return;
@@ -289,16 +297,6 @@ export function ChatScreen({
       setMessages(engine.buffer.all().slice());
       setInput("");
 
-      // The `remember_fact` tool is scoped to *this* user turn — its
-      // executor attributes any written memory back to `userTurn.id` /
-      // `userTurn.content`, so a fact the model chooses to store from
-      // "remember my name is Aaron" cleanly traces back to the moment it
-      // was learned.
-      const rememberTool = buildRememberFactTool({
-        structured,
-        sourceTurnId: userTurn.id,
-        sourceQuote: userTurn.content,
-      });
       const replyText = await generateReply(
         provider,
         engine.buffer.liveTurns(),
@@ -306,7 +304,7 @@ export function ChatScreen({
         cacheSettings,
         activeJailbreakPrompt,
         resolveActiveSkills(),
-        [rememberTool],
+        [rememberToolFor(userTurn)],
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -345,15 +343,7 @@ export function ChatScreen({
       // any step leaves the existing reply in place with nothing to roll
       // back, instead of the buffer running ahead of what's saved.
       const lastUserTurn = [...contextTurns].reverse().find((t) => t.role === TurnRole.USER);
-      const rememberTools = lastUserTurn
-        ? [
-            buildRememberFactTool({
-              structured,
-              sourceTurnId: lastUserTurn.id,
-              sourceQuote: lastUserTurn.content,
-            }),
-          ]
-        : undefined;
+      const rememberTools = lastUserTurn ? [rememberToolFor(lastUserTurn)] : undefined;
       const replyText = await generateReply(
         provider,
         contextTurns,
@@ -408,13 +398,6 @@ export function ChatScreen({
 
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
-      const editRememberTools = [
-        buildRememberFactTool({
-          structured,
-          sourceTurnId: editedTurn.id,
-          sourceQuote: editedTurn.content,
-        }),
-      ];
       const replyText = await generateReply(
         provider,
         [...priorTurns, editedTurn],
@@ -422,7 +405,7 @@ export function ChatScreen({
         cacheSettings,
         activeJailbreakPrompt,
         resolveActiveSkills(),
-        editRememberTools,
+        [rememberToolFor(editedTurn)],
       );
       const assistantTurn: Turn = {
         id: newId(),

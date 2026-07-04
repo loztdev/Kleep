@@ -165,9 +165,15 @@ export async function generateReply(
           ...(outcome.isError ? { isError: true } : {}),
         });
       } catch (err) {
+        // Keep the raw exception in local logs for debugging, but hand a
+        // generic failure string back to the model — an executor's error
+        // message can carry internal state or user data (a stack trace, a
+        // stored quote, a DB path) and none of that should be echoed into
+        // the next provider round trip.
+        console.warn(`generateReply: tool ${use.name} threw:`, err);
         toolResults.push({
           toolUseId: use.id,
-          content: `Tool ${use.name} threw: ${err instanceof Error ? err.message : String(err)}`,
+          content: `Tool ${use.name} failed. Nothing was done.`,
           isError: true,
         });
       }
@@ -197,9 +203,12 @@ export async function generateReply(
 
   // Fell out of the loop — model kept requesting tool calls past the cap.
   // Return whatever text we last saw so the UI at least renders something
-  // instead of dead silence; a defensive log flags the situation.
+  // instead of dead silence; a defensive log flags the situation. If the
+  // model never emitted any text alongside its tool calls, we still can't
+  // hand the caller an empty string — that renders as a blank assistant
+  // bubble — so fall back to a user-facing placeholder.
   console.warn(
     `generateReply: hit MAX_TOOL_ROUNDS (${MAX_TOOL_ROUNDS}) without a plain-text reply. Model may be stuck in a tool loop.`,
   );
-  return accumulatedText;
+  return accumulatedText || "Sorry, I got stuck while using a tool. Please try again.";
 }
