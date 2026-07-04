@@ -6,7 +6,7 @@
  */
 
 import Slider from "@react-native-community/slider";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -20,7 +20,7 @@ import {
   View,
 } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
-import { saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
+import { loadActiveModel, saveActiveModel, saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
 import type { PromptStore, SavedPromptKind } from "../storage";
 import type { CacheSettings } from "./chatReply";
 import { ModelPickerModal } from "./ModelPickerModal";
@@ -82,6 +82,28 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   const [responseCacheEnabled, setResponseCacheEnabled] = useState(false);
   const [responseCacheSeconds, setResponseCacheSeconds] = useState(DEFAULT_RESPONSE_CACHE_SECONDS);
 
+  // Pre-fill the model input whenever the provider selector changes. Only
+  // fills an EMPTY field — if the user has already typed something we don't
+  // overwrite it. Failures (SecureStore not available, web, no saved value)
+  // fall through silently: the input stays blank, which is exactly what an
+  // "unset" state should look like.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await loadActiveModel(kind);
+        if (cancelled) return;
+        if (saved && model.trim().length === 0) setModel(saved);
+      } catch (err) {
+        console.warn("loadActiveModel failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
+
   const handleConnect = async () => {
     const trimmedKey = apiKey.trim();
     if (!trimmedKey) {
@@ -97,6 +119,10 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
       const provider = buildLlmProvider({ kind, apiKey: trimmedKey, ...(trimmedModel ? { model: trimmedModel } : {}) });
       await saveApiKey(kind, trimmedKey);
       await saveActiveProvider(kind);
+      // Empty model deliberately clears — the user typing nothing means
+      // "use whichever default the provider ships with," which shouldn't
+      // resurrect an old saved value on next launch.
+      await saveActiveModel(kind, trimmedModel);
       const cacheSettings: CacheSettings = {
         enabled: cacheEnabled,
         ttl: cacheTtl,

@@ -125,7 +125,16 @@ export function ChatScreen({
         systemPrompt = meta.systemPrompt;
         jailbreakPrompt = meta.jailbreakPrompt;
         activeSkillIds = meta.activeSkillIds ?? [];
-        if (meta.providerKind !== providerKind || meta.model !== model) {
+        // "Something meaningfully changed" means: the provider kind flipped,
+        // OR the caller passed an *explicit* different model. A caller that
+        // passes `model=undefined` is saying "use whichever default the
+        // provider ships with," NOT "wipe the stored value" — preserve it.
+        // Without this guard, autoreconnecting after closing the app (which
+        // used to lose the model on the wire) would silently strip every
+        // existing chat's stored model on first open.
+        const providerKindChanged = meta.providerKind !== providerKind;
+        const modelExplicitlyDifferent = model !== undefined && meta.model !== model;
+        if (providerKindChanged || modelExplicitlyDifferent) {
           mismatch = true;
           sessionStore.updateProviderMeta(sessionId, providerKind, model);
         }
