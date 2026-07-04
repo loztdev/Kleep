@@ -138,6 +138,10 @@ export function ChatScreen({
   // One picker component instance, driven by which "slot" the user tapped to
   // open it — persona icon vs jailbreak icon. `null` means the modal is hidden.
   const [pickerKind, setPickerKind] = useState<SavedPromptKind | null>(null);
+  // First tap arms the wipe (icon flips to a confirm state); second tap fires
+  // it. Same "tap to arm, tap again to confirm" pattern the prompt picker uses
+  // for deletes — no separate modal for a one-button action.
+  const [confirmingWipe, setConfirmingWipe] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   // `sending` (state) lags a render behind a tap, so a fast double-tap can
   // slip through before any button disables — this ref guard is synchronous.
@@ -173,6 +177,28 @@ export function ChatScreen({
     } catch (err) {
       console.error("updateJailbreakPrompt failed:", err);
       setError(friendlyErrorMessage(err));
+    }
+  };
+
+  const handleWipeHistory = () => {
+    // Refuse while a request is in flight — wiping mid-turn would race with
+    // the appendTurn(assistantTurn) inside handleSend/regenerate/edit and
+    // strand a persisted turn that the buffer no longer knows about.
+    if (sendingRef.current) return;
+    try {
+      if (sessionId && sessionStore) sessionStore.clearTurns(sessionId, Date.now());
+      // Buffer + visible list share one source of truth — clear both in the
+      // same tick so the "empty state" placeholder appears immediately.
+      engine.buffer.clear();
+      setMessages([]);
+      setEditingTurnId(null);
+      setEditingText("");
+      setError(null);
+      setConfirmingWipe(false);
+    } catch (err) {
+      console.error("clearTurns failed:", err);
+      setError(friendlyErrorMessage(err));
+      setConfirmingWipe(false);
     }
   };
 
@@ -354,6 +380,35 @@ export function ChatScreen({
           <Text style={styles.headerTitle}>Kleep</Text>
         </View>
         <View style={styles.headerRight}>
+          <Pressable
+            onPress={() => {
+              if (confirmingWipe) {
+                handleWipeHistory();
+              } else if (messages.length > 0) {
+                setConfirmingWipe(true);
+              }
+            }}
+            hitSlop={8}
+            disabled={sending || messages.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel={confirmingWipe ? "Confirm wipe chat history" : "Wipe chat history"}
+          >
+            <Ionicons
+              name={confirmingWipe ? "checkmark-circle-outline" : "refresh-circle-outline"}
+              size={20}
+              color={confirmingWipe ? ERROR : messages.length === 0 || sending ? BORDER : MUTED}
+            />
+          </Pressable>
+          {confirmingWipe ? (
+            <Pressable
+              onPress={() => setConfirmingWipe(false)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel wipe"
+            >
+              <Ionicons name="close-outline" size={20} color={MUTED} />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => setPickerKind("jailbreak")}
             hitSlop={8}

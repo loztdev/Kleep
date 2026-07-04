@@ -56,6 +56,20 @@ export class ConversationBuffer {
     return buffer;
   }
 
+  /**
+   * Reset every mutable slot: drops the turns, the id index, the
+   * high-water mark, and the summarized set. Symmetric with a fresh
+   * `new ConversationBuffer()` — used by the chat surface's "wipe history"
+   * flow so a session's persisted state can be zeroed in place without
+   * having to reconstruct the buffer inside a memoized dep chain.
+   */
+  clear(): void {
+    this.turns = [];
+    this.byId.clear();
+    this.summarized.clear();
+    this.highWater = 0;
+  }
+
   /** Total number of turns appended (processed or not). */
   size(): number {
     return this.turns.length;

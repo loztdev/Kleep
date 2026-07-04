@@ -147,6 +147,42 @@ describe("ChatSessionStore", () => {
     expect(store.loadSession("s1").turns.map((t) => t.id)).toEqual(["t1", "t2"]);
   });
 
+  it("clearTurns deletes every turn but keeps the session row and its prompts", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({
+      id: "s1",
+      title: "Chat",
+      providerKind: "claude",
+      systemPrompt: "You are ENI.",
+      now: 100,
+    });
+    store.appendTurn("s1", turn("t1", 0), 100);
+    store.appendTurn("s1", turn("t2", 1), 100);
+    store.updateProcessedCount("s1", 2);
+
+    store.clearTurns("s1", 500);
+
+    const loaded = store.loadSession("s1");
+    expect(loaded.turns).toEqual([]);
+    expect(loaded.processedCount).toBe(0);
+    const meta = store.getSession("s1");
+    expect(meta?.title).toBe("Chat");
+    expect(meta?.systemPrompt).toBe("You are ENI.");
+    expect(meta?.updatedAt).toBe(500);
+  });
+
+  it("clearTurns lets appendTurn re-use turn indices from 0", () => {
+    const store = new ChatSessionStore(openTestDatabase());
+    store.createSession({ id: "s1", title: "Chat", providerKind: "claude", now: 100 });
+    store.appendTurn("s1", turn("t1", 0), 100);
+    store.appendTurn("s1", turn("t2", 1), 100);
+
+    store.clearTurns("s1", 500);
+    store.appendTurn("s1", turn("t3", 0), 600);
+
+    expect(store.loadSession("s1").turns.map((t) => t.id)).toEqual(["t3"]);
+  });
+
   it("createSession stores a systemPrompt when provided", () => {
     const store = new ChatSessionStore(openTestDatabase());
     const meta = store.createSession({
