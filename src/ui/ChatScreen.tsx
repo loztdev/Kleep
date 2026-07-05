@@ -53,6 +53,7 @@ import type {
 import { buildRememberFactTool } from "../memoryTools";
 import { DEFAULT_CACHE_SETTINGS, generateReply, type CacheSettings } from "./chatReply";
 import { friendlyErrorMessage } from "./friendlyError";
+import { assembleMemoryContext } from "./memoryContext";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
 import { PromptPickerModal } from "./PromptPickerModal";
 import { SkillPickerModal } from "./SkillPickerModal";
@@ -276,7 +277,20 @@ export function ChatScreen({
   // learned. Same construction runs for send / regenerate / edit; only the
   // source turn varies.
   const rememberToolFor = (turn: Turn) =>
-    buildRememberFactTool({ structured, sourceTurnId: turn.id, sourceQuote: turn.content });
+    buildRememberFactTool({ sink: engine.sink, sourceTurnId: turn.id, sourceQuote: turn.content });
+
+  // Pull the "story so far" + relevant recalled memories block once per
+  // reply. Runs at send/regenerate/edit time — the block goes into the
+  // system prompt layer so the model sees whatever the rolling summarizer
+  // swallowed out of `liveTurns()` plus anything BM25/vector/entity
+  // recall surfaces for the current user turn.
+  const memoryContextFor = async (query: string): Promise<string | undefined> =>
+    assembleMemoryContext({
+      structured,
+      fusion: engine.fusion,
+      buffer: engine.buffer,
+      query,
+    });
 
   const handleSend = async () => {
     const text = input.trim();
@@ -297,6 +311,7 @@ export function ChatScreen({
       setMessages(engine.buffer.all().slice());
       setInput("");
 
+      const memoryContext = await memoryContextFor(userTurn.content);
       const replyText = await generateReply(
         provider,
         engine.buffer.liveTurns(),
@@ -305,6 +320,7 @@ export function ChatScreen({
         activeJailbreakPrompt,
         resolveActiveSkills(),
         [rememberToolFor(userTurn)],
+        memoryContext,
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -344,6 +360,7 @@ export function ChatScreen({
       // back, instead of the buffer running ahead of what's saved.
       const lastUserTurn = [...contextTurns].reverse().find((t) => t.role === TurnRole.USER);
       const rememberTools = lastUserTurn ? [rememberToolFor(lastUserTurn)] : undefined;
+      const memoryContext = await memoryContextFor(lastUserTurn?.content ?? "");
       const replyText = await generateReply(
         provider,
         contextTurns,
@@ -352,6 +369,7 @@ export function ChatScreen({
         activeJailbreakPrompt,
         resolveActiveSkills(),
         rememberTools,
+        memoryContext,
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -398,6 +416,7 @@ export function ChatScreen({
 
     try {
       const editedTurn: Turn = { id: newId(), role: TurnRole.USER, content: text, index: target.index };
+      const memoryContext = await memoryContextFor(editedTurn.content);
       const replyText = await generateReply(
         provider,
         [...priorTurns, editedTurn],
@@ -406,6 +425,7 @@ export function ChatScreen({
         activeJailbreakPrompt,
         resolveActiveSkills(),
         [rememberToolFor(editedTurn)],
+        memoryContext,
       );
       const assistantTurn: Turn = {
         id: newId(),

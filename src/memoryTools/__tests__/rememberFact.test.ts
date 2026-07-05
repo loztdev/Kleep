@@ -1,13 +1,27 @@
+import type { AnyAsset, IngestOutcome, IngestSink } from "../../ingest";
 import { InMemoryStructuredStore } from "../../storage";
 import { MemoryKind, Network } from "../../schema";
 import { REMEMBER_FACT_TOOL_NAME, buildRememberFactTool } from "../rememberFact";
 
+/** Minimal sink that just writes through to a structured store — the tool
+ * doesn't care about dedup or indexing at unit-test level, but the
+ * production wiring routes writes through a full `IngestSink` chain. */
+function makeSink(structured: InMemoryStructuredStore): IngestSink {
+  return {
+    ingest(asset: AnyAsset): IngestOutcome {
+      structured.put(asset as Parameters<typeof structured.put>[0]);
+      return { kind: "created", asset };
+    },
+  };
+}
+
 function makeCtx() {
   const structured = new InMemoryStructuredStore();
+  const sink = makeSink(structured);
   return {
     structured,
     ctx: {
-      structured,
+      sink,
       sourceTurnId: "turn_1",
       sourceQuote: "Remember my name is Aaron.",
     },

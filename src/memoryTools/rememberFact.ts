@@ -2,7 +2,7 @@
  * `remember_fact` — a tool the model can call to persist a durable fact
  * about the user, the world, or a character into the structured memory
  * store. Bridges the model's natural-language "please remember X" impulse
- * to `StructuredStore.put`, so telling the model "Remember my name is
+ * to the ingest pipeline, so telling the model "Remember my name is
  * Aaron" actually stores something the next chat can retrieve.
  *
  * Kept deliberately minimal: only `content` is required. `tags` and
@@ -10,11 +10,16 @@
  * turn anchoring) is derived from the current conversation — the model
  * doesn't need to know how the memory graph is shaped, only what the
  * user asked it to remember.
+ *
+ * Writes go through the same `IngestSink` the extractor and rolling
+ * summarizer use, so dedup + retrieval indexing happen on this path
+ * too — a fact remembered here shows up in fusion recall for later
+ * replies, not just in the memory browser.
  */
 
+import type { IngestSink } from "../ingest";
 import { ConfidenceSource, MemoryKind, Network, newId } from "../schema";
 import type { MemoryAsset } from "../schema";
-import type { StructuredStore } from "../storage";
 import type { ToolExecutionResult, ToolRegistration } from "./types";
 
 export const REMEMBER_FACT_TOOL_NAME = "remember_fact";
@@ -23,7 +28,7 @@ export const REMEMBER_FACT_TOOL_NAME = "remember_fact";
  * turn that triggered it — the current user message the model is responding
  * to. Same shape both providers use when threading tool-execution state. */
 export interface MemoryToolContext {
-  structured: StructuredStore;
+  sink: IngestSink;
   sourceTurnId: string;
   sourceQuote: string;
 }
@@ -129,6 +134,9 @@ async function execute(rawInput: unknown, ctx: MemoryToolContext): Promise<ToolE
       },
     },
   };
-  ctx.structured.put(asset);
+  // Route through the sink — same path extraction + summarization use —
+  // so dedup runs and the retrieval indexes see the new fact for the
+  // next reply.
+  ctx.sink.ingest(asset);
   return { content: `Remembered: ${content}` };
 }
