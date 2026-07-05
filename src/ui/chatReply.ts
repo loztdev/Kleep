@@ -24,10 +24,20 @@ export interface CacheSettings {
   enabled: boolean;
   ttl?: "5m" | "1h";
   responseCacheTtlSeconds?: number;
+  /**
+   * Max output tokens the model can produce per reply. `0` (or leaving this
+   * unset) means unlimited — OpenRouter omits the field entirely and lets the
+   * underlying model's own maximum apply; Claude uses a high fallback (see
+   * `ClaudeClient.buildRequest`). Applies to output tokens, which includes
+   * the model's internal reasoning/thinking on models that spend output
+   * tokens on scratchpad before the visible reply — the old hardcoded 4096
+   * was aggressively low for reasoning models.
+   */
+  maxOutputTokens?: number;
 }
 
-/** Default caching behavior: real prompt caching on (5m), response caching off. */
-export const DEFAULT_CACHE_SETTINGS: CacheSettings = { enabled: true };
+/** Default caching behavior: real prompt caching on (5m), response caching off, unlimited output. */
+export const DEFAULT_CACHE_SETTINGS: CacheSettings = { enabled: true, maxOutputTokens: 0 };
 
 /** Cap on how many round-trips a single reply can spend inside the tool-use
  * loop. Guards against runaway `tool_use → tool_result → tool_use → ...`
@@ -109,106 +119,23 @@ export async function generateReply(
     )
     .map((t) => ({ role: t.role === TurnRole.USER ? "user" : "assistant", content: t.content }));
 
-  const toolDefinitions = tools?.map((t) => t.definition);
-  const toolsByName = new Map((tools ?? []).map((t) => [t.definition.name, t]));
-
-  // Running message list — grows as the tool loop appends assistant tool_use
-  // turns and follow-up user tool_result turns.
-  let messages: LlmMessage[] = initialMessages;
-  let accumulatedText = "";
-
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const result = await provider.sendMessage({
-      messages,
-      system: composeSystemPrompt(jailbreakPrompt, systemPrompt, activeSkills),
-      // Undefined = each provider's own default. Chat surface no longer
-      // hardcodes a low cap — reasoning models spend output tokens on
-      // thinking before the visible reply and any hardcoded value here
-      // clips them mid-thought. The user-configurable `maxOutputTokens`
-      // setting is applied from a follow-up PR at a higher layer.
-      cache: cacheSettings.enabled,
-      ...(cacheSettings.ttl ? { cacheTtl: cacheSettings.ttl } : {}),
-      ...(cacheSettings.responseCacheTtlSeconds !== undefined
-        ? { responseCacheTtlSeconds: cacheSettings.responseCacheTtlSeconds }
-        : {}),
-      ...(toolDefinitions && toolDefinitions.length > 0 ? { tools: toolDefinitions } : {}),
-    });
-
-    if (result.text) accumulatedText = result.text;
-
-    const toolUses = result.toolUses ?? [];
-    if (toolUses.length === 0) {
-      // Model finished with plain text — return whatever it produced.
-      return result.text;
-    }
-
-    // Model wants to call tools. Execute each in sequence — parallelizing is
-    // tempting but a "remember A then forget A" pair could race; sequential
-    // execution matches the order the model requested and keeps store writes
-    // deterministic. Then feed the results back for the next round.
-    const toolResults: LlmToolResult[] = [];
-    for (const use of toolUses) {
-      const registration = toolsByName.get(use.name);
-      if (!registration) {
-        toolResults.push({
-          toolUseId: use.id,
-          content: `Unknown tool: ${use.name}. Nothing was done.`,
-          isError: true,
-        });
-        continue;
-      }
-      try {
-        const outcome = await registration.execute(use.input);
-        toolResults.push({
-          toolUseId: use.id,
-          content: outcome.content,
-          ...(outcome.isError ? { isError: true } : {}),
-        });
-      } catch (err) {
-        // Keep the raw exception in local logs for debugging, but hand a
-        // generic failure string back to the model — an executor's error
-        // message can carry internal state or user data (a stack trace, a
-        // stored quote, a DB path) and none of that should be echoed into
-        // the next provider round trip.
-        console.warn(`generateReply: tool ${use.name} threw:`, err);
-        toolResults.push({
-          toolUseId: use.id,
-          content: `Tool ${use.name} failed. Nothing was done.`,
-          isError: true,
-        });
-      }
-    }
-
-    // Append the assistant turn (with its text + tool_use blocks) and the
-    // matching user turn (with the tool_result blocks). Order matters —
-    // both providers require tool_use blocks to appear before their paired
-    // tool_result blocks in the conversation.
-    const assistantBlocks: LlmContentBlock[] = [];
-    if (result.text) assistantBlocks.push({ type: "text", text: result.text });
-    for (const use of toolUses) {
-      assistantBlocks.push({ type: "tool_use", id: use.id, name: use.name, input: use.input });
-    }
-    const userBlocks: LlmContentBlock[] = toolResults.map((r) => ({
-      type: "tool_result",
-      toolUseId: r.toolUseId,
-      content: r.content,
-      ...(r.isError ? { isError: true } : {}),
-    }));
-    messages = [
-      ...messages,
-      { role: "assistant", content: assistantBlocks },
-      { role: "user", content: userBlocks },
-    ];
-  }
-
-  // Fell out of the loop — model kept requesting tool calls past the cap.
-  // Return whatever text we last saw so the UI at least renders something
-  // instead of dead silence; a defensive log flags the situation. If the
-  // model never emitted any text alongside its tool calls, we still can't
-  // hand the caller an empty string — that renders as a blank assistant
-  // bubble — so fall back to a user-facing placeholder.
-  console.warn(
-    `generateReply: hit MAX_TOOL_ROUNDS (${MAX_TOOL_ROUNDS}) without a plain-text reply. Model may be stuck in a tool loop.`,
-  );
-  return accumulatedText || "Sorry, I got stuck while using a tool. Please try again.";
+  const result = await provider.sendMessage({
+    messages,
+    system: composeSystemPrompt(jailbreakPrompt, systemPrompt, activeSkills),
+    // `0` is the user-facing "unlimited" sentinel, handled provider-side:
+    // OpenRouter omits the field; Claude falls back to its max acceptable
+    // output. Any positive number goes through verbatim. `undefined` (from
+    // an old caller that never set the field) falls back to the provider
+    // client's own default.
+    maxTokens: cacheSettings.maxOutputTokens,
+    // `messages` grows every turn, so once the conversation crosses the
+    // model's minimum cacheable token count, later turns get cheaper,
+    // faster reprocessing of the earlier history.
+    cache: cacheSettings.enabled,
+    ...(cacheSettings.ttl ? { cacheTtl: cacheSettings.ttl } : {}),
+    ...(cacheSettings.responseCacheTtlSeconds !== undefined
+      ? { responseCacheTtlSeconds: cacheSettings.responseCacheTtlSeconds }
+      : {}),
+  });
+  return result.text;
 }

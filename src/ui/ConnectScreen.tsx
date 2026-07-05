@@ -20,7 +20,14 @@ import {
   View,
 } from "react-native";
 import { buildLlmProvider, type LlmProvider, type LlmProviderKind } from "../llm";
-import { loadActiveModel, saveActiveModel, saveActiveProvider, saveApiKey } from "../llm/secureKeyStore";
+import {
+  loadActiveModel,
+  loadOutputMaxTokens,
+  saveActiveModel,
+  saveActiveProvider,
+  saveApiKey,
+  saveOutputMaxTokens,
+} from "../llm/secureKeyStore";
 import type { PromptStore, SavedPromptKind } from "../storage";
 import type { CacheSettings } from "./chatReply";
 import { ModelPickerModal } from "./ModelPickerModal";
@@ -81,6 +88,26 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
   const [cacheTtl, setCacheTtl] = useState<"5m" | "1h">("5m");
   const [responseCacheEnabled, setResponseCacheEnabled] = useState(false);
   const [responseCacheSeconds, setResponseCacheSeconds] = useState(DEFAULT_RESPONSE_CACHE_SECONDS);
+  // Max output tokens as raw text so an empty field can round-trip cleanly to
+  // "unlimited" (empty string ↔ 0 sentinel) without React fighting the input.
+  // Loaded from SecureStore on mount; empty at first render until that resolves.
+  const [outputMaxTokensText, setOutputMaxTokensText] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await loadOutputMaxTokens();
+        if (cancelled || saved === null) return;
+        setOutputMaxTokensText(saved > 0 ? String(saved) : "");
+      } catch (err) {
+        console.warn("loadOutputMaxTokens failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Track whether the current model value came from `loadActiveModel` or
   // from a user keystroke. On a provider-kind change we want to *replace*
@@ -138,9 +165,16 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
       // "use whichever default the provider ships with," which shouldn't
       // resurrect an old saved value on next launch.
       await saveActiveModel(kind, trimmedModel);
+      // Parse output max — empty or non-positive means "unlimited" (sentinel
+      // `0`). Persist the resolved integer so autoreconnect on next launch
+      // reads back the same value.
+      const parsedMax = parseInt(outputMaxTokensText.trim(), 10);
+      const maxOutputTokens = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 0;
+      await saveOutputMaxTokens(maxOutputTokens);
       const cacheSettings: CacheSettings = {
         enabled: cacheEnabled,
         ttl: cacheTtl,
+        maxOutputTokens,
         // Response caching is an OpenRouter-only feature — see CacheSettings' doc.
         ...(kind === "openrouter" && responseCacheEnabled ? { responseCacheTtlSeconds: responseCacheSeconds } : {}),
       };
@@ -266,6 +300,26 @@ export function ConnectScreen({ promptStore, onConnected }: ConnectScreenProps) 
           >
             <Text style={styles.browseButtonText}>Browse</Text>
           </Pressable>
+        </View>
+
+        <View style={styles.cacheSection}>
+          <View style={styles.cacheLabelGroup}>
+            <Text style={styles.cacheLabel}>Max output tokens</Text>
+            <Text style={styles.cacheHint}>
+              How much the model can produce per reply — including any internal reasoning tokens on reasoning
+              models. Leave empty for unlimited (OpenRouter uses the model's own maximum; Claude uses its highest
+              accepted value). Typical presets: 4096, 32000, 65536, 131072.
+            </Text>
+            <TextInput
+              style={styles.maxTokensInput}
+              placeholder="Unlimited"
+              placeholderTextColor={MUTED}
+              value={outputMaxTokensText}
+              onChangeText={setOutputMaxTokensText}
+              keyboardType="number-pad"
+              editable={!connecting}
+            />
+          </View>
         </View>
 
         <View style={styles.cacheSection}>
@@ -456,6 +510,17 @@ const styles = StyleSheet.create({
   cacheHint: {
     color: MUTED,
     fontSize: 12,
+  },
+  maxTokensInput: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: TEXT,
   },
   ttlRow: {
     flexDirection: "row",

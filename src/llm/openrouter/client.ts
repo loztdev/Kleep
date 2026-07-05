@@ -209,20 +209,18 @@ export class OpenRouterClient implements LlmProvider {
         : []),
       ...conversationMessages,
     ];
+    // `maxTokens === 0` is the "unlimited" sentinel — OpenRouter's API treats
+    // an omitted `max_tokens` as "use whatever the underlying model's own
+    // maximum is," which is exactly what users mean by unlimited. `undefined`
+    // still falls back to `defaultMaxTokens` so existing internal callers
+    // (extraction, summarization) that never set the field keep their
+    // conservative defaults. Any positive value goes on the wire verbatim.
+    const maxTokens =
+      opts.maxTokens === 0 ? undefined : opts.maxTokens ?? this.defaultMaxTokens;
     return {
       model,
       messages,
-      max_tokens: opts.maxTokens ?? this.defaultMaxTokens,
-      ...(opts.tools && opts.tools.length > 0
-        ? {
-            tools: opts.tools.map(
-              (t): OpenRouterTool => ({
-                type: "function",
-                function: { name: t.name, description: t.description, parameters: t.inputSchema },
-              }),
-            ),
-          }
-        : {}),
+      ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
     };
   }
 

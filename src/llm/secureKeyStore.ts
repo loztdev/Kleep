@@ -30,6 +30,7 @@ import * as SecureStore from "expo-secure-store";
 export type LlmProviderKind = "claude" | "openrouter";
 
 const ACTIVE_PROVIDER_KEY = "kleep.llm_active_provider";
+const OUTPUT_MAX_TOKENS_KEY = "kleep.llm_output_max_tokens";
 const IS_WEB = Platform.OS === "web";
 
 function apiKeyStorageKey(provider: LlmProviderKind): string {
@@ -97,4 +98,25 @@ export async function loadActiveModel(provider: LlmProviderKind): Promise<string
 export async function clearActiveModel(provider: LlmProviderKind): Promise<void> {
   if (IS_WEB) return;
   await SecureStore.deleteItemAsync(modelStorageKey(provider));
+}
+
+/**
+ * Persist the user's global "max output tokens" preference. Value `0` means
+ * unlimited (see `generateReply` for how each provider interprets that).
+ * This is app-wide rather than per-provider — it's a "how long a reply do
+ * you want" preference, not a provider-specific tuning.
+ */
+export async function saveOutputMaxTokens(value: number): Promise<void> {
+  if (IS_WEB) return;
+  await SecureStore.setItemAsync(OUTPUT_MAX_TOKENS_KEY, String(Math.max(0, Math.floor(value))));
+}
+
+/** Read back the stored max output tokens, or `null` if never set (always `null` on web). */
+export async function loadOutputMaxTokens(): Promise<number | null> {
+  if (IS_WEB) return null;
+  const raw = await SecureStore.getItemAsync(OUTPUT_MAX_TOKENS_KEY);
+  if (raw === null) return null;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
 }
