@@ -221,6 +221,16 @@ export class OpenRouterClient implements LlmProvider {
       model,
       messages,
       ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+      ...(opts.tools && opts.tools.length > 0
+        ? {
+            tools: opts.tools.map(
+              (t): OpenRouterTool => ({
+                type: "function",
+                function: { name: t.name, description: t.description, parameters: t.inputSchema },
+              }),
+            ),
+          }
+        : {}),
     };
   }
 
