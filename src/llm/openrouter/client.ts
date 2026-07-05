@@ -24,6 +24,7 @@ import type {
   LlmStructuredOptions,
   LlmStructuredResult,
   LlmTextResult,
+  LlmToolUse,
 } from "../types";
 import { zodToToolInputSchema } from "../zodToJsonSchema";
 import { RealOpenRouterTransport, type RealOpenRouterTransportOptions } from "./realTransport";
@@ -193,7 +194,10 @@ export class OpenRouterClient implements LlmProvider {
       ? { type: "ephemeral", ...(opts.cacheTtl ? { ttl: opts.cacheTtl } : {}) }
       : undefined;
 
-    const conversationMessages = opts.messages.map(toOpenRouterMessage);
+    // A user turn whose content is `tool_result` blocks becomes several
+    // separate `role: "tool"` messages in the OpenAI-compat shape — one per
+    // tool call — so `flatMap` rather than `map`.
+    const conversationMessages = opts.messages.flatMap(toOpenRouterMessages);
     const lastIndex = conversationMessages.length - 1;
     if (cacheControl && lastIndex >= 0) {
       conversationMessages[lastIndex] = withCacheControl(conversationMessages[lastIndex]!, cacheControl);
@@ -217,6 +221,16 @@ export class OpenRouterClient implements LlmProvider {
       model,
       messages,
       ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+      ...(opts.tools && opts.tools.length > 0
+        ? {
+            tools: opts.tools.map(
+              (t): OpenRouterTool => ({
+                type: "function",
+                function: { name: t.name, description: t.description, parameters: t.inputSchema },
+              }),
+            ),
+          }
+        : {}),
     };
   }
 
@@ -232,8 +246,54 @@ export class OpenRouterClient implements LlmProvider {
   }
 }
 
-function toOpenRouterMessage(message: LlmMessage): OpenRouterMessage {
-  return { role: message.role, content: message.content };
+/** Translate one generic `LlmMessage` into one or more OpenRouter-shaped
+ * messages. Plain string content passes through. A block array is split by
+ * type: `text` → collapsed into `content`, `tool_use` → moved onto the
+ * assistant message's `tool_calls`, `tool_result` → emitted as a separate
+ * `role: "tool"` message (OpenAI's convention). Returning an array so
+ * `flatMap` in `buildRequest` handles the fan-out uniformly. */
+function toOpenRouterMessages(message: LlmMessage): OpenRouterMessage[] {
+  if (typeof message.content === "string") {
+    return [{ role: message.role, content: message.content }];
+  }
+
+  // Split blocks into their three flavors so we can shape the OpenAI-compat
+  // wire form: assistant → one message with text+tool_calls, user →
+  // {text-message?} + {one tool message per tool_result}.
+  const textParts: string[] = [];
+  const toolCalls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = [];
+  const toolResults: Array<{ toolUseId: string; content: string }> = [];
+  for (const block of message.content) {
+    if (block.type === "text") textParts.push(block.text);
+    else if (block.type === "tool_use") {
+      toolCalls.push({
+        id: block.id,
+        type: "function",
+        function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+      });
+    } else if (block.type === "tool_result") {
+      toolResults.push({ toolUseId: block.toolUseId, content: block.content });
+    }
+  }
+
+  const out: OpenRouterMessage[] = [];
+  const textContent = textParts.join("");
+  if (message.role === "assistant") {
+    // OpenAI requires `content: null` when only tool_calls are present; a
+    // string (even empty) alongside tool_calls is fine too, but null is more
+    // faithful to what the model actually produced.
+    out.push({
+      role: "assistant",
+      content: textContent.length > 0 ? textContent : null,
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    });
+  } else {
+    if (textContent.length > 0) out.push({ role: "user", content: textContent });
+    for (const r of toolResults) {
+      out.push({ role: "tool", content: r.content, tool_call_id: r.toolUseId });
+    }
+  }
+  return out;
 }
 
 function buildRequestOptions(opts: LlmSendOptions): OpenRouterRequestOptions {
@@ -242,10 +302,14 @@ function buildRequestOptions(opts: LlmSendOptions): OpenRouterRequestOptions {
   };
 }
 
-/** Switches a message's content to the block-array form `cache_control` requires. No-op when `cacheControl` is undefined. */
+/** Switches a message's content to the block-array form `cache_control`
+ * requires. No-op when `cacheControl` is undefined; also a no-op when
+ * `content` is `null` (assistant-with-only-tool-calls has no text to mark). */
 function withCacheControl(message: OpenRouterMessage, cacheControl: OpenRouterCacheControl | undefined): OpenRouterMessage {
   if (!cacheControl) return message;
-  const text = typeof message.content === "string" ? message.content : message.content.map((b) => b.text).join("");
+  if (message.content === null) return message;
+  const text =
+    typeof message.content === "string" ? message.content : message.content.map((b) => b.text).join("");
   return { ...message, content: [{ type: "text", text, cache_control: cacheControl }] };
 }
 
@@ -253,15 +317,52 @@ function toTextResult(response: OpenRouterResponse): LlmTextResult {
   const usage = response.usage;
   const choice = response.choices[0];
   const content = choice?.message.content ?? null;
-  // Empty/null content on HTTP 200 = "silent refusal" — see
-  // `OpenRouterEmptyResponseError`'s doc for why we throw here instead of
-  // returning "" and letting the chat surface an invisible assistant bubble.
-  if (!content) {
+  const rawToolCalls = choice?.message.tool_calls ?? [];
+  const toolUses: LlmToolUse[] = rawToolCalls.map((c) => ({
+    id: c.id,
+    name: c.function.name,
+    input: parseToolArguments(c.function.arguments),
+  }));
+  // Silent-refusal check applies only when the model produced NEITHER text
+  // NOR tool_calls. A tool-only response with `content: null` is legitimate
+  // and shouldn't throw.
+  if (!content && toolUses.length === 0) {
     throw new OpenRouterEmptyResponseError(choice?.finish_reason ?? null, response);
   }
   return {
-    text: content,
+    text: content ?? "",
     model: response.model,
     usage: { inputTokens: usage?.prompt_tokens ?? 0, outputTokens: usage?.completion_tokens ?? 0 },
+    ...(toolUses.length > 0 ? { toolUses } : {}),
+    stopReason: toStopReason(choice?.finish_reason ?? null),
   };
+}
+
+/** OpenAI's `function.arguments` is a JSON string. Return the parsed value
+ * when it's valid JSON, or the raw string when it isn't — tools can then
+ * decide whether to accept partial/malformed input. */
+function parseToolArguments(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Map OpenAI's finish_reason strings into our normalized `LlmStopReason`.
+ * Anything unrecognized becomes `"other"` — we surface it rather than
+ * throwing so a caller can log and continue. */
+function toStopReason(raw: string | null): LlmTextResult["stopReason"] {
+  switch (raw) {
+    case "stop":
+      return "end_turn";
+    case "tool_calls":
+      return "tool_use";
+    case "length":
+      return "max_tokens";
+    case "content_filter":
+      return "other";
+    default:
+      return raw === null ? undefined : "other";
+  }
 }

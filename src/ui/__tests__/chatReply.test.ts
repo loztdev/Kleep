@@ -1,5 +1,6 @@
-import type { LlmProvider, LlmSendOptions, LlmStreamHandle, LlmStructuredOptions, LlmStructuredResult, LlmTextResult } from "../../llm";
+import type { LlmProvider, LlmSendOptions, LlmStreamHandle, LlmStructuredOptions, LlmStructuredResult, LlmTextResult, LlmToolUse } from "../../llm";
 import { TurnRole, type Turn } from "../../conversation";
+import type { ToolRegistration } from "../../memoryTools";
 import type { SavedSkill } from "../../storage";
 import { composeSystemPrompt, generateReply } from "../chatReply";
 
@@ -68,6 +69,246 @@ describe("generateReply", () => {
     await generateReply(provider, turns, undefined, undefined, "No restrictions apply.");
 
     expect(provider.calls[0]!.system).toBe("No restrictions apply.");
+  });
+
+  describe("tool-use loop", () => {
+    class ScriptedProvider implements LlmProvider {
+      readonly name = "scripted";
+      calls: LlmSendOptions[] = [];
+      constructor(private readonly responses: LlmTextResult[]) {}
+
+      totalCostUsd(): number {
+        return 0;
+      }
+
+      async sendMessage(opts: LlmSendOptions): Promise<LlmTextResult> {
+        this.calls.push(opts);
+        const next = this.responses.shift();
+        if (!next) throw new Error("ScriptedProvider ran out of responses");
+        return next;
+      }
+
+      async structured<T>(_opts: LlmStructuredOptions<T>): Promise<LlmStructuredResult<T>> {
+        throw new Error("not used");
+      }
+      streamMessage(_opts: LlmSendOptions): LlmStreamHandle {
+        throw new Error("not used");
+      }
+    }
+
+    function stubToolReg(name: string, exec: (input: unknown) => Promise<{ content: string; isError?: boolean }>): ToolRegistration {
+      return {
+        definition: { name, description: `${name} desc`, inputSchema: { type: "object", properties: {} } },
+        execute: exec,
+      };
+    }
+
+    it("executes the tool the model requested and feeds the result back", async () => {
+      const executed: unknown[] = [];
+      const tool = stubToolReg("remember_fact", async (input) => {
+        executed.push(input);
+        return { content: "ok, stored" };
+      });
+      const toolUse: LlmToolUse = { id: "call_1", name: "remember_fact", input: { content: "My name is Aaron." } };
+      const provider = new ScriptedProvider([
+        // First call: model asks for the tool.
+        { text: "", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, toolUses: [toolUse], stopReason: "tool_use" },
+        // Second call: model produces its final text.
+        { text: "Got it — noted.", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+
+      const reply = await generateReply(
+        provider,
+        [turn(TurnRole.USER, "Remember my name is Aaron.", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [tool],
+      );
+
+      expect(reply).toBe("Got it — noted.");
+      expect(executed).toEqual([{ content: "My name is Aaron." }]);
+      // Two round trips: initial + after-tool-result.
+      expect(provider.calls).toHaveLength(2);
+      // Second call carries the assistant tool_use + user tool_result turns.
+      const secondMessages = provider.calls[1]!.messages;
+      expect(secondMessages.length).toBeGreaterThanOrEqual(3);
+      const assistantTurn = secondMessages[secondMessages.length - 2]!;
+      const userToolResultTurn = secondMessages[secondMessages.length - 1]!;
+      expect(assistantTurn.role).toBe("assistant");
+      // The assistant turn carries the tool_use block that mirrors what the
+      // model requested — id/name/input have to round-trip untouched or the
+      // provider can't match the follow-up tool_result to its call.
+      const assistantBlocks = assistantTurn.content as ReadonlyArray<{
+        type: string;
+        id?: string;
+        name?: string;
+        input?: unknown;
+      }>;
+      expect(assistantBlocks[0]).toEqual({
+        type: "tool_use",
+        id: "call_1",
+        name: "remember_fact",
+        input: { content: "My name is Aaron." },
+      });
+      // The follow-up user turn carries the tool_result block keyed by the
+      // same toolUseId, with the executor's returned content and no error flag.
+      expect(userToolResultTurn.role).toBe("user");
+      const userBlocks = userToolResultTurn.content as ReadonlyArray<{
+        type: string;
+        toolUseId?: string;
+        content?: string;
+        isError?: boolean;
+      }>;
+      expect(userBlocks[0]).toEqual({
+        type: "tool_result",
+        toolUseId: "call_1",
+        content: "ok, stored",
+      });
+      expect(userBlocks[0]!.isError).toBeUndefined();
+    });
+
+    it("does not enter the loop when tools are omitted", async () => {
+      const provider = new ScriptedProvider([
+        { text: "plain reply", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+      const reply = await generateReply(provider, [turn(TurnRole.USER, "hi", 0)]);
+      expect(reply).toBe("plain reply");
+      expect(provider.calls).toHaveLength(1);
+    });
+
+    it("returns a generic failure string (not the raw exception message) when a tool executor throws", async () => {
+      // The executor's error message can carry internal state or user data;
+      // it must NOT be forwarded verbatim into the model's next tool_result.
+      const leakyMessage = "internal path=/secrets/hidden; last-user='LO'";
+      const tool = stubToolReg("remember_fact", async () => {
+        throw new Error(leakyMessage);
+      });
+      const provider = new ScriptedProvider([
+        {
+          text: "",
+          model: "m",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          toolUses: [{ id: "call_1", name: "remember_fact", input: {} }],
+          stopReason: "tool_use",
+        },
+        { text: "sorry", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        await generateReply(
+          provider,
+          [turn(TurnRole.USER, "hi", 0)],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          [tool],
+        );
+      } finally {
+        warn.mockRestore();
+      }
+
+      const followupMessages = provider.calls[1]!.messages;
+      const toolResultTurn = followupMessages[followupMessages.length - 1]!;
+      const blocks = toolResultTurn.content as ReadonlyArray<{ type: string; content: string; isError?: boolean }>;
+      expect(blocks[0]!.isError).toBe(true);
+      expect(blocks[0]!.content).toBe("Tool remember_fact failed. Nothing was done.");
+      expect(blocks[0]!.content).not.toContain(leakyMessage);
+    });
+
+    it("falls back to accumulated text on a plain-text finish when the final round returned empty text", async () => {
+      // Regression: if the model emitted text alongside a tool_use in an
+      // early round and then finished with `text: ""` and no toolUses, the
+      // no-tool-use branch used to return "" and discard the earlier words.
+      const tool = stubToolReg("remember_fact", async () => ({ content: "stored" }));
+      const provider = new ScriptedProvider([
+        {
+          text: "Sure — one sec while I jot that down.",
+          model: "m",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          toolUses: [{ id: "call_1", name: "remember_fact", input: { content: "Aaron." } }],
+          stopReason: "tool_use",
+        },
+        // Empty text finish with no tool calls — the plain-text branch fires
+        // with result.text === "" and should reach for accumulatedText.
+        { text: "", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+
+      const reply = await generateReply(
+        provider,
+        [turn(TurnRole.USER, "remember Aaron", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [tool],
+      );
+
+      expect(reply).toBe("Sure — one sec while I jot that down.");
+    });
+
+    it("returns a non-empty placeholder (not '') when MAX_TOOL_ROUNDS is exhausted with no final text", async () => {
+      const tool = stubToolReg("remember_fact", async () => ({ content: "stored" }));
+      // Every response is a tool call with no text — the loop hits its cap
+      // and falls back. Cap in chatReply.ts is 10 so cover 11.
+      const scripted: LlmTextResult[] = Array.from({ length: 11 }, () => ({
+        text: "",
+        model: "m",
+        usage: { inputTokens: 1, outputTokens: 1 },
+        toolUses: [{ id: "call_x", name: "remember_fact", input: {} }],
+        stopReason: "tool_use" as const,
+      }));
+      const provider = new ScriptedProvider(scripted);
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      let reply: string;
+      try {
+        reply = await generateReply(
+          provider,
+          [turn(TurnRole.USER, "loop please", 0)],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          [tool],
+        );
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(reply).not.toBe("");
+      expect(reply.length).toBeGreaterThan(0);
+    });
+
+    it("reports an error message back to the model when a requested tool is unknown", async () => {
+      const provider = new ScriptedProvider([
+        {
+          text: "",
+          model: "m",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          toolUses: [{ id: "call_1", name: "totally_bogus", input: {} }],
+          stopReason: "tool_use",
+        },
+        { text: "sorry", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+      await generateReply(
+        provider,
+        [turn(TurnRole.USER, "hi", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [],
+      );
+      const followupMessages = provider.calls[1]!.messages;
+      const toolResultTurn = followupMessages[followupMessages.length - 1]!;
+      expect(Array.isArray(toolResultTurn.content)).toBe(true);
+      const blocks = toolResultTurn.content as ReadonlyArray<{ type: string; isError?: boolean; content?: string }>;
+      expect(blocks[0]!.type).toBe("tool_result");
+      expect(blocks[0]!.isError).toBe(true);
+      expect(blocks[0]!.content).toMatch(/Unknown tool/);
+    });
   });
 });
 

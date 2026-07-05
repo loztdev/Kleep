@@ -33,6 +33,13 @@ function toolUseMessage(name: string, input: unknown): Anthropic.Message {
   return { ...textMessage(""), content: [{ type: "tool_use", id: "toolu_1", name, input, caller: { type: "direct" } }] };
 }
 
+function toolUseStopMessage(name: string, input: unknown): Anthropic.Message {
+  return {
+    ...toolUseMessage(name, input),
+    stop_reason: "tool_use",
+  };
+}
+
 class StubTransport implements ClaudeTransport {
   calls: ClaudeRequest[] = [];
   constructor(private readonly impl: (req: ClaudeRequest) => Promise<Anthropic.Message>) {}
@@ -52,7 +59,8 @@ describe("ClaudeProvider", () => {
 
     const result = await provider.sendMessage({ messages: [{ role: "user", content: "hi" }] });
 
-    expect(result).toEqual({ text: "hello", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(result).toMatchObject({ text: "hello", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(result.stopReason).toBe("end_turn");
     expect(provider.name).toBe("claude");
   });
 
@@ -129,6 +137,116 @@ describe("ClaudeProvider", () => {
     const final = await handle.final;
 
     expect(collected.join("")).toBe("hi there");
-    expect(final).toEqual({ text: "hi there", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(final).toMatchObject({ text: "hi there", model: "claude-opus-4-8", usage: { inputTokens: 10, outputTokens: 5 } });
+  });
+
+  describe("tool-use translation", () => {
+    it("passes `tools` through to the Claude request in Anthropic's input_schema shape", async () => {
+      const transport = new StubTransport(async () => textMessage("hello"));
+      const provider = new ClaudeProvider(new ClaudeClient({ transport }));
+
+      await provider.sendMessage({
+        messages: [{ role: "user", content: "hi" }],
+        tools: [
+          {
+            name: "remember_fact",
+            description: "store a fact",
+            inputSchema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
+          },
+        ],
+      });
+
+      expect(transport.calls[0]!.tools).toEqual([
+        {
+          name: "remember_fact",
+          description: "store a fact",
+          input_schema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
+        },
+      ]);
+    });
+
+    it("translates content-block messages (tool_use + tool_result) into Anthropic's block shape", async () => {
+      const transport = new StubTransport(async () => textMessage("ok"));
+      const provider = new ClaudeProvider(new ClaudeClient({ transport }));
+
+      await provider.sendMessage({
+        messages: [
+          { role: "user", content: "remember my name is Aaron" },
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: "sure" },
+              { type: "tool_use", id: "toolu_1", name: "remember_fact", input: { content: "The user's name is Aaron." } },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", toolUseId: "toolu_1", content: "Remembered: The user's name is Aaron." },
+            ],
+          },
+        ],
+      });
+
+      const req = transport.calls[0]!;
+      // Assistant turn should carry text + tool_use blocks in Anthropic's tagged shape.
+      const assistant = req.messages[1]!;
+      expect(assistant.role).toBe("assistant");
+      expect(Array.isArray(assistant.content)).toBe(true);
+      const assistantBlocks = assistant.content as Anthropic.ContentBlockParam[];
+      expect(assistantBlocks[0]).toEqual({ type: "text", text: "sure" });
+      expect(assistantBlocks[1]).toEqual({
+        type: "tool_use",
+        id: "toolu_1",
+        name: "remember_fact",
+        input: { content: "The user's name is Aaron." },
+      });
+
+      // Follow-up user turn should carry the tool_result block, keyed by `tool_use_id`.
+      const followupUser = req.messages[2]!;
+      const userBlocks = followupUser.content as Anthropic.ContentBlockParam[];
+      expect(userBlocks[0]).toEqual({
+        type: "tool_result",
+        tool_use_id: "toolu_1",
+        content: "Remembered: The user's name is Aaron.",
+      });
+    });
+
+    it("forwards is_error on a tool_result block only when set", async () => {
+      const transport = new StubTransport(async () => textMessage("ok"));
+      const provider = new ClaudeProvider(new ClaudeClient({ transport }));
+
+      await provider.sendMessage({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", toolUseId: "toolu_1", content: "bad input", isError: true },
+              { type: "tool_result", toolUseId: "toolu_2", content: "fine" },
+            ],
+          },
+        ],
+      });
+
+      const blocks = transport.calls[0]!.messages[0]!.content as Anthropic.ContentBlockParam[];
+      expect(blocks[0]).toMatchObject({ is_error: true });
+      expect((blocks[1] as { is_error?: boolean }).is_error).toBeUndefined();
+    });
+
+    it("extracts toolUses + stopReason='tool_use' when the model requests a tool call", async () => {
+      const transport = new StubTransport(async () =>
+        toolUseStopMessage("remember_fact", { content: "The user's name is Aaron." }),
+      );
+      const provider = new ClaudeProvider(new ClaudeClient({ transport }));
+
+      const result = await provider.sendMessage({ messages: [{ role: "user", content: "remember my name" }] });
+
+      expect(result.stopReason).toBe("tool_use");
+      expect(result.toolUses).toEqual([
+        { id: "toolu_1", name: "remember_fact", input: { content: "The user's name is Aaron." } },
+      ]);
+      // No text blocks in the response → empty string, not `undefined`.
+      expect(result.text).toBe("");
+    });
   });
 });

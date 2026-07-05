@@ -50,6 +50,7 @@ import type {
   StructuredStore,
   VectorStore,
 } from "../storage";
+import { buildRememberFactTool } from "../memoryTools";
 import { DEFAULT_CACHE_SETTINGS, generateReply, type CacheSettings } from "./chatReply";
 import { friendlyErrorMessage } from "./friendlyError";
 import { buildMemoryEngine, syncSessionProgress } from "./memoryEngine";
@@ -269,6 +270,14 @@ export function ChatScreen({
     if (sessionId && sessionStore) syncSessionProgress(sessionStore, sessionId, engine.buffer);
   };
 
+  // The `remember_fact` tool is scoped to a single triggering user turn —
+  // its executor attributes any written memory back to that turn's id/
+  // content, so a fact the model stores cleanly traces back to when it was
+  // learned. Same construction runs for send / regenerate / edit; only the
+  // source turn varies.
+  const rememberToolFor = (turn: Turn) =>
+    buildRememberFactTool({ structured, sourceTurnId: turn.id, sourceQuote: turn.content });
+
   const handleSend = async () => {
     const text = input.trim();
     if (!text || sendingRef.current) return;
@@ -295,6 +304,7 @@ export function ChatScreen({
         cacheSettings,
         activeJailbreakPrompt,
         resolveActiveSkills(),
+        [rememberToolFor(userTurn)],
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -332,6 +342,8 @@ export function ChatScreen({
       // mirror it into `engine.buffer` once that succeeds — a failure at
       // any step leaves the existing reply in place with nothing to roll
       // back, instead of the buffer running ahead of what's saved.
+      const lastUserTurn = [...contextTurns].reverse().find((t) => t.role === TurnRole.USER);
+      const rememberTools = lastUserTurn ? [rememberToolFor(lastUserTurn)] : undefined;
       const replyText = await generateReply(
         provider,
         contextTurns,
@@ -339,6 +351,7 @@ export function ChatScreen({
         cacheSettings,
         activeJailbreakPrompt,
         resolveActiveSkills(),
+        rememberTools,
       );
       const assistantTurn: Turn = {
         id: newId(),
@@ -392,6 +405,7 @@ export function ChatScreen({
         cacheSettings,
         activeJailbreakPrompt,
         resolveActiveSkills(),
+        [rememberToolFor(editedTurn)],
       );
       const assistantTurn: Turn = {
         id: newId(),
