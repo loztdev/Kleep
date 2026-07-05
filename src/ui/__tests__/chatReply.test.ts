@@ -218,6 +218,37 @@ describe("generateReply", () => {
       expect(blocks[0]!.content).not.toContain(leakyMessage);
     });
 
+    it("falls back to accumulated text on a plain-text finish when the final round returned empty text", async () => {
+      // Regression: if the model emitted text alongside a tool_use in an
+      // early round and then finished with `text: ""` and no toolUses, the
+      // no-tool-use branch used to return "" and discard the earlier words.
+      const tool = stubToolReg("remember_fact", async () => ({ content: "stored" }));
+      const provider = new ScriptedProvider([
+        {
+          text: "Sure — one sec while I jot that down.",
+          model: "m",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          toolUses: [{ id: "call_1", name: "remember_fact", input: { content: "Aaron." } }],
+          stopReason: "tool_use",
+        },
+        // Empty text finish with no tool calls — the plain-text branch fires
+        // with result.text === "" and should reach for accumulatedText.
+        { text: "", model: "m", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" },
+      ]);
+
+      const reply = await generateReply(
+        provider,
+        [turn(TurnRole.USER, "remember Aaron", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [tool],
+      );
+
+      expect(reply).toBe("Sure — one sec while I jot that down.");
+    });
+
     it("returns a non-empty placeholder (not '') when MAX_TOOL_ROUNDS is exhausted with no final text", async () => {
       const tool = stubToolReg("remember_fact", async () => ({ content: "stored" }));
       // Every response is a tool call with no text — the loop hits its cap

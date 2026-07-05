@@ -154,8 +154,13 @@ export async function generateReply(
 
     const toolUses = result.toolUses ?? [];
     if (toolUses.length === 0) {
-      // Model finished with plain text — return whatever it produced.
-      return result.text;
+      // Model finished with plain text — prefer this round's text, but if it
+      // came back empty (some providers emit only tool_use in one round and
+      // an empty text finish in the next), fall back to whatever we saw
+      // earlier in the loop so we don't discard the model's own words. Same
+      // placeholder as the MAX_TOOL_ROUNDS fallback rather than "" so the
+      // UI never renders a blank assistant bubble.
+      return result.text || accumulatedText || "Sorry, I couldn't produce a reply. Please try again.";
     }
 
     // Model wants to call tools. Execute each in sequence — parallelizing is
