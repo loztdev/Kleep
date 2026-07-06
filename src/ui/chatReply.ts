@@ -49,31 +49,37 @@ const MAX_TOOL_ROUNDS = 10;
 /**
  * Compose the effective system message. Layer order from front to back:
  *
- *   [jailbreak]  ← establishes what's allowed
- *   [persona]    ← decides how the model sounds
- *   [skills]     ← task-specific guidance the model should apply on trigger
+ *   [jailbreak]       ← establishes what's allowed
+ *   [persona]         ← decides how the model sounds
+ *   [memory context]  ← "story so far" + retrieved relevant memories
+ *   [skills]          ← task-specific guidance the model should apply on trigger
  *
  * Persona-last vs jailbreak keeps the "permissions floor" from being reset
- * by whatever the persona says. Skills-last vs persona keeps the persona's
- * *voice* setting the baseline while a triggered skill overlays its
- * task-specific rules on top. Every layer degrades gracefully — empty/
- * whitespace-only strings and empty arrays are all treated as "not set,"
- * so callers can pass `undefined`, `""`, or `[]` interchangeably. Both
- * slots empty and no skills falls back to the built-in Kleep persona.
+ * by whatever the persona says. Memory context after persona so the voice
+ * is set before the model sees the story-so-far snippet — otherwise a
+ * summary written in third person can bleed into the reply tone. Skills-
+ * last vs everything else keeps their task-specific overrides on top.
+ * Every layer degrades gracefully — empty/whitespace-only strings and
+ * empty arrays are all treated as "not set," so callers can pass
+ * `undefined`, `""`, or `[]` interchangeably. All slots empty falls back
+ * to the built-in Kleep persona.
  */
 export function composeSystemPrompt(
   jailbreakPrompt?: string,
   systemPrompt?: string,
   activeSkills?: readonly SavedSkill[],
+  memoryContext?: string,
 ): string {
   const jb = jailbreakPrompt?.trim() ?? "";
   const persona = systemPrompt?.trim() ?? "";
+  const memory = memoryContext?.trim() ?? "";
   const skills = (activeSkills ?? []).filter((s) => s.body.trim().length > 0);
 
   const parts: string[] = [];
   if (jb) parts.push(jb);
   if (persona) parts.push(persona);
-  if (parts.length === 0 && skills.length === 0) parts.push(DEFAULT_SYSTEM_PROMPT);
+  if (parts.length === 0 && skills.length === 0 && !memory) parts.push(DEFAULT_SYSTEM_PROMPT);
+  if (memory) parts.push(memory);
   if (skills.length > 0) parts.push(renderSkillsBlock(skills));
   return parts.join("\n\n");
 }
@@ -112,6 +118,7 @@ export async function generateReply(
   jailbreakPrompt?: string,
   activeSkills?: readonly SavedSkill[],
   tools?: readonly ToolRegistration[],
+  memoryContext?: string,
 ): Promise<string> {
   const initialMessages: LlmMessage[] = turns
     .filter((t): t is Turn & { role: typeof TurnRole.USER | typeof TurnRole.ASSISTANT } =>
@@ -130,7 +137,7 @@ export async function generateReply(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await provider.sendMessage({
       messages,
-      system: composeSystemPrompt(jailbreakPrompt, systemPrompt, activeSkills),
+      system: composeSystemPrompt(jailbreakPrompt, systemPrompt, activeSkills, memoryContext),
       // `0` is the user-facing "unlimited" sentinel, handled provider-side:
       // OpenRouter omits the field; Claude falls back to its max acceptable
       // output. Any positive number goes through verbatim. `undefined` (from

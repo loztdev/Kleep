@@ -381,4 +381,68 @@ describe("composeSystemPrompt", () => {
     expect(jbIdx).toBeLessThan(personaIdx);
     expect(personaIdx).toBeLessThan(skillsIdx);
   });
+
+  describe("memoryContext layer", () => {
+    it("inserts the memory block between persona and skills", () => {
+      const result = composeSystemPrompt(
+        "No restrictions.",
+        "You are ENI.",
+        [skill("s1", "Scene Structure", "body")],
+        "# Memory context\n\n## Story so far\n\nAaron met the dragon.",
+      );
+      const jb = result.indexOf("No restrictions.");
+      const persona = result.indexOf("You are ENI.");
+      const memory = result.indexOf("# Memory context");
+      const skills = result.indexOf("# Skills");
+      expect(jb).toBeLessThan(persona);
+      expect(persona).toBeLessThan(memory);
+      expect(memory).toBeLessThan(skills);
+    });
+
+    it("emits the memory block alone (no default persona) when everything else is empty", () => {
+      const result = composeSystemPrompt(
+        undefined,
+        undefined,
+        [],
+        "# Memory context\n\n## Story so far\n\nAaron met the dragon.",
+      );
+      expect(result).toContain("# Memory context");
+      expect(result).not.toContain("You are Kleep");
+    });
+
+    it("treats whitespace-only memory context as absent (falls back to the default persona)", () => {
+      const result = composeSystemPrompt(undefined, undefined, [], "   \n\n  ");
+      expect(result).toContain("Kleep");
+      expect(result).not.toContain("# Memory context");
+    });
+  });
+
+  describe("generateReply with memoryContext", () => {
+    it("passes the memory context through to the provider's system prompt", async () => {
+      const provider = new (class {
+        readonly name = "scripted";
+        calls: import("../../llm").LlmSendOptions[] = [];
+        totalCostUsd() { return 0; }
+        async sendMessage(opts: import("../../llm").LlmSendOptions) {
+          this.calls.push(opts);
+          return { text: "ok", model: "m", usage: { inputTokens: 1, outputTokens: 1 } } as import("../../llm").LlmTextResult;
+        }
+        async structured<T>() { throw new Error("not used"); return {} as never; }
+        streamMessage() { throw new Error("not used"); return {} as never; }
+      })();
+
+      await generateReply(
+        provider as unknown as import("../../llm").LlmProvider,
+        [turn(TurnRole.USER, "continue the story", 0)],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "# Memory context\n\n## Story so far\n\nAaron met the dragon.",
+      );
+
+      expect(provider.calls[0]!.system).toContain("Aaron met the dragon.");
+    });
+  });
 });
