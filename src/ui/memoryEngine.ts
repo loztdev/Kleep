@@ -93,8 +93,12 @@ export function buildMemoryEngine(
   // prior sessions. The retrieval indexes are in-memory, so on load we
   // walk everything and reindex — otherwise recall returns nothing until
   // the current session writes something new, silently blinding the
-  // model to a whole prior conversation's history.
+  // model to a whole prior conversation's history. Both stores need a
+  // pass: MemoryAssets + WorldBibleEntries live in `structured`, but
+  // LoreSnippets live in `vector` and would otherwise never regain
+  // BM25/entity/chronological coverage after a restart.
   for (const asset of structured.query({})) fusion.index(asset);
+  for (const snippet of vector.list()) fusion.index(snippet);
 
   const extractor = new LlmExtractor({ client: provider });
   const autoRetain = new AutoRetainEngine(buffer, extractor, sink, {
